@@ -34,6 +34,19 @@ class Config:
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
+    # Crash Handler Configuration
+    MAX_RESTART_ATTEMPTS = int(os.getenv('MAX_RESTART_ATTEMPTS', '5'))
+    RESTART_DELAY_BASE = int(os.getenv('RESTART_DELAY_BASE', '10'))  # seconds
+    
+    # Parse EMERGENCY_CHANNEL_ID, handling comments and whitespace
+    _emergency_channel_raw = os.getenv('EMERGENCY_CHANNEL_ID', '')
+    if _emergency_channel_raw:
+        # Remove comments and strip whitespace
+        _emergency_channel_clean = _emergency_channel_raw.split('#')[0].strip()
+        EMERGENCY_CHANNEL_ID = _emergency_channel_clean if _emergency_channel_clean else None
+    else:
+        EMERGENCY_CHANNEL_ID = None
+    
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present"""
@@ -53,4 +66,19 @@ class Config:
                 return int(cls.DISCORD_CHANNEL_ID)
             except ValueError:
                 raise ValueError(f"Invalid DISCORD_CHANNEL_ID: {cls.DISCORD_CHANNEL_ID}")
+        return None
+
+    # Circuit Breaker Configuration
+    CB_FAILURE_THRESHOLD = int(os.getenv('CB_FAILURE_THRESHOLD', '3'))
+    CB_OPEN_SECONDS = int(os.getenv('CB_OPEN_SECONDS', '120'))
+    CB_HALF_OPEN_PROBES = int(os.getenv('CB_HALF_OPEN_PROBES', '1'))
+    
+    @classmethod
+    def get_emergency_channel_id(cls):
+        """Get the emergency Discord channel ID as an integer"""
+        if cls.EMERGENCY_CHANNEL_ID:
+            try:
+                return int(cls.EMERGENCY_CHANNEL_ID)
+            except ValueError:
+                raise ValueError(f"Invalid EMERGENCY_CHANNEL_ID: {cls.EMERGENCY_CHANNEL_ID}")
         return None

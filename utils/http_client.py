@@ -13,6 +13,7 @@ from typing import Optional, Tuple, Dict, Any
 from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from config.config import Config
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,6 +36,15 @@ class OilPriceHTTPClient:
         self.base_polling_interval = base_polling_interval
         self.relaxed_polling_interval = base_polling_interval * 3  # 3x base interval for relaxed mode
         self.current_polling_interval = self.base_polling_interval
+
+        # Circuit breaker state
+        self.cb_failure_threshold = Config.CB_FAILURE_THRESHOLD
+        self.cb_open_seconds = Config.CB_OPEN_SECONDS
+        self.cb_half_open_probes = Config.CB_HALF_OPEN_PROBES
+        self.cb_state = 'closed'  # 'closed' | 'open' | 'half_open'
+        self.cb_failures = 0
+        self.cb_open_until: Optional[float] = None
+        self.cb_probes_remaining = 0
     
     def _create_session(self) -> requests.Session:
         """Create a requests session with retry logic and proper headers"""
@@ -84,6 +94,48 @@ class OilPriceHTTPClient:
         
         return headers
     
+    def _before_request(self) -> Optional[Dict[str, Any]]:
+        """Check circuit breaker state before making a request.
+        Returns a response_info dict if the breaker is open and request should be skipped.
+        """
+        now = time.time()
+        if self.cb_state == 'open':
+            if self.cb_open_until and now >= self.cb_open_until:
+                # Move to half-open and allow limited probes
+                self.cb_state = 'half_open'
+                self.cb_probes_remaining = max(1, self.cb_half_open_probes)
+            else:
+                return {'circuit_breaker': 'open', 'timestamp': now}
+        if self.cb_state == 'half_open':
+            if self.cb_probes_remaining <= 0:
+                return {'circuit_breaker': 'open', 'timestamp': now}
+            # consume a probe
+            self.cb_probes_remaining -= 1
+        return None
+
+    def _record_success(self):
+        # Reset failures and close breaker on success
+        self.cb_failures = 0
+        if self.cb_state in ('open', 'half_open'):
+            logger.warning("Circuit breaker closing after successful probe")
+        self.cb_state = 'closed'
+        self.cb_open_until = None
+        self.cb_probes_remaining = 0
+
+    def _record_failure(self, reason: str):
+        self.cb_failures += 1
+        logger.debug(f"Circuit breaker failure count: {self.cb_failures} (reason: {reason})")
+        if self.cb_state == 'half_open':
+            # Immediate reopen on failure in half-open
+            self.cb_state = 'open'
+            self.cb_open_until = time.time() + self.cb_open_seconds
+            logger.warning(f"Circuit breaker re-opened for {self.cb_open_seconds}s after failed probe")
+            return
+        if self.cb_failures >= self.cb_failure_threshold and self.cb_state == 'closed':
+            self.cb_state = 'open'
+            self.cb_open_until = time.time() + self.cb_open_seconds
+            logger.warning(f"Circuit breaker opened for {self.cb_open_seconds}s (failures={self.cb_failures})")
+
     def fetch_oil_prices(self, use_conditional: bool = True) -> Tuple[bool, Optional[str], Dict[str, Any]]:
         """
         Fetch oil prices from the endpoint with optional conditional requests
@@ -98,6 +150,12 @@ class OilPriceHTTPClient:
             - response_info: Dictionary with response metadata
         """
         try:
+            # Circuit breaker pre-check
+            cb_block = self._before_request()
+            if cb_block is not None:
+                logger.info("Circuit breaker open, skipping HTTP request")
+                return False, None, cb_block
+
             # Prepare request
             headers = {}
             if use_conditional and self._should_use_conditional_request():
@@ -125,6 +183,7 @@ class OilPriceHTTPClient:
             if response.status_code == 304:  # Not Modified
                 logger.info("Content unchanged (HTTP 304)")
                 self._update_polling_interval(False)
+                self._record_success()
                 return False, None, response_info
             
             elif response.status_code == 200:  # OK
@@ -141,25 +200,31 @@ class OilPriceHTTPClient:
                 else:
                     logger.info("Content unchanged (same hash)")
                     self._update_polling_interval(False)
+                self._record_success()
                 
                 return has_changed, content, response_info
             
             else:
                 logger.warning(f"Unexpected response status: {response.status_code}")
                 response_info['error'] = f"HTTP {response.status_code}"
+                self._record_failure(response_info['error'])
                 return False, None, response_info
                 
         except requests.exceptions.Timeout:
             logger.error("Request timeout")
+            self._record_failure('timeout')
             return False, None, {'error': 'timeout', 'timestamp': time.time()}
         except requests.exceptions.ConnectionError as e:
             logger.error(f"Connection error: {e}")
+            self._record_failure('connection_error')
             return False, None, {'error': f'connection_error: {e}', 'timestamp': time.time()}
         except requests.exceptions.RequestException as e:
             logger.error(f"Request error: {e}")
+            self._record_failure('request_exception')
             return False, None, {'error': f'request_error: {e}', 'timestamp': time.time()}
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
+            self._record_failure('unexpected')
             return False, None, {'error': f'unexpected_error: {e}', 'timestamp': time.time()}
     
     def _update_content_metadata(self, content_hash: str, response: requests.Response):
@@ -205,7 +270,15 @@ class OilPriceHTTPClient:
             'last_response_time': self.last_response_time,
             'last_content_hash': self.last_content_hash[:8] if self.last_content_hash else None,
             'next_poll_time': self.get_next_poll_time(),
-            'base_url': self.base_url
+            'base_url': self.base_url,
+            'circuit_breaker': {
+                'state': self.cb_state,
+                'failures': self.cb_failures,
+                'open_until': self.cb_open_until,
+                'failure_threshold': self.cb_failure_threshold,
+                'open_seconds': self.cb_open_seconds,
+                'half_open_probes': self.cb_half_open_probes
+            }
         }
     
     def reset_polling_state(self):
@@ -216,6 +289,11 @@ class OilPriceHTTPClient:
         self.last_modified = None
         self.consecutive_no_changes = 0
         self.current_polling_interval = self.base_polling_interval
+        # Reset breaker
+        self.cb_state = 'closed'
+        self.cb_failures = 0
+        self.cb_open_until = None
+        self.cb_probes_remaining = 0
         logger.info("Polling state reset")
     
     def close(self):

@@ -31,91 +31,36 @@ class PriceChangeEvent:
     event_type: str  # 'initial', 'update', 'reset'
 
 class OilPriceMonitor:
-    """Main monitoring system for oil prices"""
+    """Main monitoring system for oil prices (v2: in-memory only)"""
     
     def __init__(self, 
                  base_url: str = "https://play.myfly.club/oil-prices",
-                 storage_file: str = "price_history.json",
                  change_threshold: float = 0.01,  # 1 cent threshold
                  polling_interval: int = 300):  # Default 5 minutes
         self.parser = OilPriceParser()
         self.http_client = OilPriceHTTPClient(base_url, polling_interval)
-        self.storage_file = storage_file
         self.change_threshold = change_threshold
         
-        # Current state
+        # Current state (in-memory only)
         self.current_price: Optional[OilPriceData] = None
         self.last_change_event: Optional[PriceChangeEvent] = None
-        self.price_history: List[Dict[str, Any]] = []
         self.monitoring_active = False
         
-        # Load existing price history
-        self._load_price_history()
+        # Statistics tracking (in-memory only)
+        self.total_updates_processed = 0
+        self.total_changes_detected = 0
+        self.session_start_time = time.time()
         
-        # Initialize with current price if available
-        self._initialize_current_price()
+        logger.info("Oil price monitor initialized (v2: in-memory only)")
     
-    def _load_price_history(self):
-        """Load price history from storage file"""
-        try:
-            with open(self.storage_file, 'r', encoding='utf-8') as file:
-                data = json.load(file)
-                self.price_history = data.get('history', [])
-                logger.info(f"Loaded {len(self.price_history)} price history entries")
-        except FileNotFoundError:
-            logger.info("No existing price history found, starting fresh")
-            self.price_history = []
-        except Exception as e:
-            logger.error(f"Error loading price history: {e}")
-            self.price_history = []
-    
-    def _save_price_history(self):
-        """Save price history to storage file"""
-        try:
-            data = {
-                'last_updated': time.time(),
-                'total_entries': len(self.price_history),
-                'history': self.price_history
-            }
-            with open(self.storage_file, 'w', encoding='utf-8') as file:
-                json.dump(data, file, indent=2)
-            logger.debug(f"Saved {len(self.price_history)} price history entries")
-        except Exception as e:
-            logger.error(f"Error saving price history: {e}")
-    
-    def _initialize_current_price(self):
-        """Initialize current price from storage or fetch from endpoint"""
-        if self.price_history:
-            # Get the most recent entry
-            latest_entry = max(self.price_history, key=lambda x: x['timestamp'])
-            self.current_price = OilPriceData(
-                price=latest_entry['price'],
-                cycle=latest_entry['cycle'],
-                timestamp=latest_entry.get('timestamp_str')
-            )
-            logger.info(f"Initialized current price: ${self.current_price.price:.2f} (Cycle: {self.current_price.cycle})")
-        else:
-            logger.info("No price history available, will fetch on first check")
-    
-    def _add_to_history(self, price_data: OilPriceData, event_type: str = 'update'):
-        """Add price data to history"""
-        entry = {
-            'timestamp': time.time(),
-            'timestamp_str': datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat(),
-            'price': price_data.price,
-            'cycle': price_data.cycle,
-            'event_type': event_type
-        }
+    def _update_statistics(self, event_type: str = 'update'):
+        """Update in-memory statistics"""
+        self.total_updates_processed += 1
         
-        self.price_history.append(entry)
+        if event_type in ['initial', 'update']:
+            self.total_changes_detected += 1
         
-        # Keep only last 1000 entries to prevent file from growing too large
-        if len(self.price_history) > 1000:
-            self.price_history = self.price_history[-1000:]
-            logger.debug("Trimmed price history to 1000 entries")
-        
-        # Save to file
-        self._save_price_history()
+        logger.debug(f"Statistics updated: {self.total_updates_processed} processed, {self.total_changes_detected} changes")
     
     def _detect_price_change(self, new_price_data: OilPriceData) -> Optional[PriceChangeEvent]:
         """Detect if there's a meaningful price change"""
@@ -172,6 +117,11 @@ class OilPriceMonitor:
         try:
             # Fetch latest prices from endpoint
             has_changed, content, response_info = self.http_client.fetch_oil_prices()
+
+            # Handle circuit breaker Open state (skip without errors)
+            if response_info and isinstance(response_info, dict) and response_info.get('circuit_breaker') == 'open':
+                logger.warning("HTTP circuit breaker is open; skipping update check this cycle")
+                return None
             
             if not has_changed:
                 logger.debug("No content changes detected")
@@ -192,8 +142,8 @@ class OilPriceMonitor:
                 self.current_price = new_price_data
                 self.last_change_event = change_event
                 
-                # Add to history
-                self._add_to_history(new_price_data, change_event.event_type)
+                # Update statistics
+                self._update_statistics(change_event.event_type)
                 
                 logger.info(f"Price update processed: {change_event.event_type}")
                 return change_event
@@ -202,7 +152,7 @@ class OilPriceMonitor:
                 if (self.current_price is None or 
                     new_price_data.cycle > self.current_price.cycle):
                     self.current_price = new_price_data
-                    self._add_to_history(new_price_data, 'update')
+                    self._update_statistics('minor_update')
                     logger.debug(f"Price updated without significant change: ${new_price_data.price:.2f}")
                 
                 return None
@@ -216,33 +166,28 @@ class OilPriceMonitor:
         return self.current_price
     
     def get_price_change_summary(self) -> Dict[str, Any]:
-        """Get a summary of recent price changes"""
-        if not self.price_history:
-            return {'error': 'No price history available'}
-        
-        # Get last 10 entries
-        recent_history = self.price_history[-10:]
-        
-        # Calculate basic statistics
-        prices = [entry['price'] for entry in recent_history]
-        cycles = [entry['cycle'] for entry in recent_history]
+        """Get a summary of current price status and session statistics"""
+        current_time = time.time()
+        session_duration = current_time - self.session_start_time
         
         summary = {
             'current_price': self.current_price.price if self.current_price else None,
             'current_cycle': self.current_price.cycle if self.current_price else None,
             'last_update': self.last_change_event.timestamp if self.last_change_event else None,
-            'recent_prices': recent_history,
-            'price_stats': {
-                'min_price': min(prices),
-                'max_price': max(prices),
-                'avg_price': sum(prices) / len(prices),
-                'price_range': max(prices) - min(prices)
+            'session_stats': {
+                'session_duration': session_duration,
+                'total_updates_processed': self.total_updates_processed,
+                'total_changes_detected': self.total_changes_detected,
+                'session_start_time': self.session_start_time,
+                'monitoring_active': self.monitoring_active
             },
-            'cycle_stats': {
-                'min_cycle': min(cycles),
-                'max_cycle': max(cycles),
-                'total_entries': len(self.price_history)
-            }
+            'last_change_event': {
+                'event_type': self.last_change_event.event_type if self.last_change_event else None,
+                'price_change': self.last_change_event.price_change if self.last_change_event else None,
+                'price_change_percent': self.last_change_event.price_change_percent if self.last_change_event else None,
+                'old_price': self.last_change_event.old_price if self.last_change_event else None,
+                'new_price': self.last_change_event.new_price if self.last_change_event else None
+            } if self.last_change_event else None
         }
         
         return summary
@@ -250,6 +195,8 @@ class OilPriceMonitor:
     def get_monitoring_status(self) -> Dict[str, Any]:
         """Get the current monitoring status"""
         http_status = self.http_client.get_polling_status()
+        current_time = time.time()
+        session_duration = current_time - self.session_start_time
         
         status = {
             'monitoring_active': self.monitoring_active,
@@ -259,7 +206,12 @@ class OilPriceMonitor:
                 'timestamp': self.current_price.timestamp if self.current_price else None
             },
             'last_change_event': asdict(self.last_change_event) if self.last_change_event else None,
-            'price_history_count': len(self.price_history),
+            'session_stats': {
+                'session_duration': session_duration,
+                'total_updates_processed': self.total_updates_processed,
+                'total_changes_detected': self.total_changes_detected,
+                'session_start_time': self.session_start_time
+            },
             'change_threshold': self.change_threshold,
             'http_client_status': http_status
         }
@@ -288,20 +240,13 @@ class OilPriceMonitor:
         """Reset the monitoring state (useful for testing)"""
         self.current_price = None
         self.last_change_event = None
-        self.price_history = []
         self.monitoring_active = False
+        self.total_updates_processed = 0
+        self.total_changes_detected = 0
+        self.session_start_time = time.time()
         self.http_client.reset_polling_state()
         
-        # Clear storage file
-        try:
-            import os
-            if os.path.exists(self.storage_file):
-                os.remove(self.storage_file)
-                logger.info(f"Removed storage file: {self.storage_file}")
-        except Exception as e:
-            logger.error(f"Error removing storage file: {e}")
-        
-        logger.info("Monitoring state reset")
+        logger.info("Monitoring state reset (v2: in-memory only)")
     
     def close(self):
         """Clean up resources"""
@@ -310,10 +255,9 @@ class OilPriceMonitor:
 
 
 def create_monitor(base_url: str = "https://play.myfly.club/oil-prices",
-                  storage_file: str = "price_history.json",
                   polling_interval: int = 300) -> OilPriceMonitor:
-    """Factory function to create a new monitor instance"""
-    return OilPriceMonitor(base_url, storage_file, polling_interval=polling_interval)
+    """Factory function to create a new monitor instance (v2: in-memory only)"""
+    return OilPriceMonitor(base_url, polling_interval=polling_interval)
 
 
 # Example usage and testing
@@ -359,14 +303,15 @@ if __name__ == "__main__":
         # Test 4: Get price change summary
         print("\n📈 Test 4: Price change summary")
         summary = monitor.get_price_change_summary()
-        if 'error' not in summary:
-            print(f"✅ Price summary:")
+        print(f"✅ Price summary (v2: in-memory):")
+        if summary['current_price']:
             print(f"   Current price: ${summary['current_price']:.2f}")
             print(f"   Current cycle: {summary['current_cycle']}")
-            print(f"   Total history entries: {summary['cycle_stats']['total_entries']}")
-            print(f"   Recent price range: ${summary['price_stats']['min_price']:.2f} - ${summary['price_stats']['max_price']:.2f}")
         else:
-            print(f"❌ Summary error: {summary['error']}")
+            print("   Current price: Not available")
+        print(f"   Session duration: {summary['session_stats']['session_duration']:.1f}s")
+        print(f"   Updates processed: {summary['session_stats']['total_updates_processed']}")
+        print(f"   Changes detected: {summary['session_stats']['total_changes_detected']}")
         
         print("\n🎉 Price monitor tests completed!")
         

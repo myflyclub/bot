@@ -13,6 +13,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.config import Config
 from utils.price_monitor import create_monitor, PriceChangeEvent
+from utils.crash_handler import create_crash_handler, with_crash_recovery
+from utils.bot_supervisor import create_supervised_bot
+from utils.discord_client_wrapper import send_message_with_retry, edit_channel_name_with_retry
+from utils.health_status import HealthStatusAggregator
 
 # Load environment variables
 load_dotenv()
@@ -33,10 +37,40 @@ intents.members = False
 intents.presences = False
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+health_aggregator = HealthStatusAggregator()
 
 # Price monitoring
 price_monitor = None
 monitoring_task = None
+
+# Initialize global crash handler
+crash_handler = create_crash_handler(
+    max_restart_attempts=Config.MAX_RESTART_ATTEMPTS,
+    restart_delay_base=Config.RESTART_DELAY_BASE,
+    emergency_channel_id=Config.get_emergency_channel_id(),
+    emergency_token=Config.DISCORD_TOKEN
+)
+
+async def _graceful_shutdown():
+    """Gracefully stop background tasks and close the Discord client."""
+    global monitoring_task, price_monitor
+    try:
+        if price_monitor:
+            price_monitor.stop_monitoring()
+        if monitoring_task and not monitoring_task.done():
+            monitoring_task.cancel()
+            try:
+                await monitoring_task
+            except Exception:
+                pass
+    finally:
+        try:
+            await bot.close()
+        except Exception:
+            pass
+
+# Register graceful shutdown with crash handler
+crash_handler.set_shutdown_callback(_graceful_shutdown)
 
 @bot.event
 async def on_ready():
@@ -171,9 +205,12 @@ async def auto_rename_channel(change_event):
             else:
                 new_channel_name = f"oil {direction_emoji}💲{price_str}"
         
-        # Rename the channel
-        await target_channel.edit(name=new_channel_name)
-        logger.info(f"Auto-renamed channel to: {new_channel_name}")
+        # Rename the channel with retry/rate-limit handling
+        success = await edit_channel_name_with_retry(bot, channel_id, new_channel_name)
+        if success:
+            logger.info(f"Auto-renamed channel to: {new_channel_name}")
+        else:
+            logger.error(f"Failed to auto-rename channel {channel_id} after retries")
         
     except discord.Forbidden:
         logger.error(f"Bot lacks permission to rename channel {channel_id}")
@@ -270,11 +307,67 @@ async def send_unified_oil_price_message(price_data, change_event=None, is_updat
         time_str = current_time.strftime("%H:%M")
         embed.add_field(name="⏰ Time", value=f"{time_str} UTC", inline=True)
         
-        await target_channel.send(embed=embed)
-        logger.info(f"Unified oil price message sent to channel {channel_id}")
-        
+        success = await send_message_with_retry(bot, channel_id, embed=embed)
+        if success:
+            logger.info(f"Unified oil price message sent to channel {channel_id}")
+        else:
+            logger.error(f"Failed to send unified oil price message to channel {channel_id} after retries")
     except Exception as e:
         logger.error(f"Error sending unified oil price message: {e}")
+
+
+@bot.command(name='health', help='Show bot health and breaker status')
+async def health_command(ctx):
+    try:
+        snap = health_aggregator.snapshot(price_monitor, bot)
+        embed = discord.Embed(
+            title="🩺 Bot Health",
+            description="Runtime and dependency health",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="⏱️ Uptime", value=f"{snap.uptime:.1f}s", inline=True)
+        embed.add_field(name="🧭 Monitoring", value=str(snap.monitoring_active), inline=True)
+        embed.add_field(name="🌐 Guilds", value=str(snap.guild_count), inline=True)
+        if snap.websocket_latency is not None:
+            embed.add_field(name="📶 WS Latency", value=f"{snap.websocket_latency*1000:.0f} ms", inline=True)
+        embed.add_field(name="💰 Price", value=(f"${snap.current_price:.2f}" if snap.current_price is not None else "—"), inline=True)
+        embed.add_field(name="🔄 Cycle", value=(str(snap.current_cycle) if snap.current_cycle is not None else "—"), inline=True)
+        embed.add_field(name="🕒 Last HTTP", value=(f"<t:{int(snap.last_http_response_time)}:R>" if snap.last_http_response_time else "—"), inline=True)
+        embed.add_field(name="🕒 Next Poll", value=(f"<t:{int(snap.next_poll_time)}:R>" if snap.next_poll_time else "—"), inline=True)
+        embed.add_field(name="🧮 Updates", value=str(snap.total_updates_processed), inline=True)
+        embed.add_field(name="📈 Changes", value=str(snap.total_changes_detected), inline=True)
+        cb = snap.circuit_breaker
+        embed.add_field(name="🛡️ Breaker", value=f"{cb.get('state')} (fail={cb.get('failures')})", inline=False)
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ **Error:** Failed to get health: {str(e)}")
+        logger.error(f"Error generating health: {e}")
+
+
+@bot.command(name='stats', help='Show session statistics')
+async def stats_command(ctx):
+    try:
+        if not price_monitor:
+            await ctx.send("❌ **Error:** Price monitor not initialized.")
+            return
+        summary = price_monitor.get_price_change_summary()
+        embed = discord.Embed(
+            title="📊 Session Statistics",
+            description="Monitoring session metrics",
+            color=discord.Color.purple()
+        )
+        sess = summary.get('session_stats', {})
+        embed.add_field(name="⏱️ Session Duration", value=f"{sess.get('session_duration', 0):.1f}s", inline=True)
+        embed.add_field(name="🧮 Updates", value=str(sess.get('total_updates_processed', 0)), inline=True)
+        embed.add_field(name="📈 Changes", value=str(sess.get('total_changes_detected', 0)), inline=True)
+        last = summary.get('last_change_event') or {}
+        embed.add_field(name="📝 Last Event", value=str(last.get('event_type')), inline=True)
+        embed.add_field(name="💵 Last Δ", value=(f"${last.get('price_change'):+.2f}" if last.get('price_change') is not None else "—"), inline=True)
+        embed.add_field(name="% Last Δ", value=(f"{last.get('price_change_percent'):+.2f}%" if last.get('price_change_percent') is not None else "—"), inline=True)
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ **Error:** Failed to get stats: {str(e)}")
+        logger.error(f"Error generating stats: {e}")
 
 def start_monitoring_task():
     """Start the background monitoring task"""
@@ -290,8 +383,9 @@ def stop_monitoring_task():
     if monitoring_task and not monitoring_task.done():
         monitoring_task.cancel()
 
+@with_crash_recovery(crash_handler)
 async def background_monitoring():
-    """Background task for automatic price monitoring"""
+    """Background task for automatic price monitoring with crash recovery"""
     if not price_monitor:
         return
     
@@ -306,12 +400,20 @@ async def background_monitoring():
                 if change_event:
                     logger.info(f"Price update detected in background: ${change_event.new_price:.2f}")
                     
-                    # Auto-rename channel
-                    await auto_rename_channel(change_event)
+                    # Auto-rename channel with error handling
+                    try:
+                        await auto_rename_channel(change_event)
+                    except Exception as e:
+                        logger.error(f"Error in channel rename: {e}")
+                        # Continue monitoring even if channel rename fails
                     
-                    # Send notification to configured channel
+                    # Send notification to configured channel with error handling
                     if Config.DISCORD_CHANNEL_ID:
-                        await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
+                        try:
+                            await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
+                        except Exception as e:
+                            logger.error(f"Error sending price message: {e}")
+                            # Continue monitoring even if message sending fails
                 
                 # Wait for next check (use monitor's polling interval)
                 next_poll = price_monitor.http_client.get_next_poll_time()
@@ -326,17 +428,25 @@ async def background_monitoring():
                 break
             except Exception as e:
                 logger.error(f"Error in background monitoring: {e}")
+                # Report to crash handler for tracking but don't crash
+                await crash_handler.handle_crash(e, {
+                    'function': 'background_monitoring',
+                    'monitoring_active': price_monitor.monitoring_active if price_monitor else False,
+                    'current_price': price_monitor.get_current_price().price if price_monitor and price_monitor.get_current_price() else None
+                })
                 await asyncio.sleep(60)  # Wait 1 minute on error
     
     except asyncio.CancelledError:
         logger.info("Background monitoring task cancelled")
     except Exception as e:
         logger.error(f"Background monitoring task failed: {e}")
+        # This will be caught by the crash recovery decorator
+        raise
     finally:
         logger.info("Background monitoring task stopped")
 
 async def main():
-    """Main function to run the bot"""
+    """Main function to run the bot (without crash recovery)"""
     try:
         # Validate configuration
         Config.validate()
@@ -354,12 +464,86 @@ async def main():
         logger.error(f"Configuration error: {e}")
         print(f"❌ Configuration error: {e}")
         print("Please check your .env file and ensure DISCORD_TOKEN is set.")
+        raise
     except Exception as e:
         logger.error(f"Failed to start bot: {e}", exc_info=True)
         print(f"❌ Failed to start bot: {e}")
+        raise
+
+async def main_supervised():
+    """Main function to run the bot with crash recovery and auto-restart"""
+    logger.info("Starting bot with crash recovery and auto-restart...")
+    
+    # Create supervised bot
+    supervisor = create_supervised_bot(main)
+    
+    try:
+        # Start the supervised bot
+        await supervisor.start()
+    except KeyboardInterrupt:
+        logger.info("Bot supervisor stopped by user")
+        print("⏹️ Bot supervisor stopped by user")
+    except Exception as e:
+        logger.critical(f"Critical error in bot supervisor: {e}", exc_info=True)
+        print(f"💥 Critical supervisor error: {e}")
+        raise
+    finally:
+        # Get final stats
+        stats = supervisor.get_supervisor_stats()
+        logger.info(f"Final supervisor stats: {stats}")
+        print(f"📊 Final run stats: {stats['successful_runs']} successful runs, "
+              f"{stats['crash_handler_stats']['total_crashes']} crashes")
+
+# Add crash stats command for monitoring
+@bot.command(name='crash-stats', hidden=True)
+async def crash_stats_command(ctx):
+    """Get crash handler statistics (hidden admin command)"""
+    try:
+        stats = crash_handler.get_crash_stats()
+        
+        embed = discord.Embed(
+            title="🛡️ Crash Handler Statistics",
+            description="Bot stability and recovery information",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(name="🔄 Restart Count", value=f"{stats['restart_count']}/{stats['max_restart_attempts']}", inline=True)
+        embed.add_field(name="⏱️ Current Uptime", value=f"{stats['current_uptime']:.1f}s", inline=True)
+        embed.add_field(name="💥 Total Crashes", value=str(stats['total_crashes']), inline=True)
+        
+        if stats['last_crash_time']:
+            last_crash = datetime.fromtimestamp(stats['last_crash_time'], tz=timezone.utc)
+            embed.add_field(name="🕐 Last Crash", value=f"<t:{int(stats['last_crash_time'])}:R>", inline=True)
+        
+        embed.add_field(name="🚀 Start Time", value=f"<t:{int(stats['start_time'])}:F>", inline=False)
+        
+        # Add recent crash history
+        if stats['crash_history']:
+            crash_list = []
+            for crash in stats['crash_history'][-5:]:  # Last 5 crashes
+                crash_time = datetime.fromtimestamp(crash['timestamp'], tz=timezone.utc)
+                crash_list.append(f"`{crash['error_type']}` - <t:{int(crash['timestamp'])}:R>")
+            
+            embed.add_field(name="📋 Recent Crashes", value="\n".join(crash_list) or "None", inline=False)
+        
+        await ctx.send(embed=embed)
+        logger.info(f"Crash stats requested by {ctx.author}")
+        
+    except Exception as e:
+        await ctx.send(f"❌ **Error:** Failed to get crash stats: {str(e)}")
+        logger.error(f"Error getting crash stats: {e}")
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    
+    # Check if we should run with supervision (default) or without
+    run_supervised = os.getenv('RUN_SUPERVISED', 'true').lower() == 'true'
+    
+    if run_supervised:
+        print("🛡️ Starting bot with crash recovery and auto-restart...")
+        asyncio.run(main_supervised())
+    else:
+        print("⚠️ Starting bot WITHOUT crash recovery (not recommended for production)")
+        asyncio.run(main())
 
 
