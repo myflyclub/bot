@@ -17,6 +17,8 @@ from utils.crash_handler import create_crash_handler, with_crash_recovery
 from utils.bot_supervisor import create_supervised_bot
 from utils.discord_client_wrapper import send_message_with_retry, edit_channel_name_with_retry
 from utils.health_status import HealthStatusAggregator
+from utils.rotd_service import ROTDService
+from utils.rotd_formatter import format_rotd_text
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +40,7 @@ intents.presences = False
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 health_aggregator = HealthStatusAggregator()
+rotd_service = ROTDService()
 
 # Price monitoring
 price_monitor = None
@@ -101,6 +104,10 @@ async def on_ready():
     
     # Start passive monitoring immediately
     await start_passive_monitoring()
+
+    # Start ROTD loop if enabled and channel configured
+    if Config.ROTD_ENABLED and Config.DISCORD_RROTD_CHANNEL:
+        await start_rotd_loop()
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -264,6 +271,152 @@ async def fetch_and_send_current_price():
         
     except Exception as e:
         logger.error(f"Error fetching and sending current price: {e}")
+
+async def start_rotd_loop():
+    """Schedule a daily ROTD post to the configured channel."""
+    try:
+        # Schedule daily loop using discord.ext.tasks
+        @tasks.loop(hours=24)
+        async def daily_rotd():
+            try:
+                await post_rotd_once()
+            except Exception as e:
+                logger.error(f"ROTD daily task error: {e}")
+
+        # start after a small delay to ensure bot is fully ready
+        await asyncio.sleep(5)
+        daily_rotd.start()
+        logger.info("ROTD daily task scheduled (every 24h)")
+    except Exception as e:
+        logger.error(f"Failed to start ROTD loop: {e}")
+
+async def post_rotd_once():
+    """Generate and post one ROTD report to the configured channel."""
+    channel_id = Config.get_rrotd_channel_id()
+    if not channel_id:
+        logger.warning("ROTD channel not configured")
+        return
+    
+    logger.info("ROTD: Generating payload")
+    pair = Config.get_rotd_pair()
+    payload = None
+    
+    if pair:
+        # Use configured pair
+        origin_id, dest_id = pair
+        logger.info(f"ROTD: Using configured pair {origin_id} -> {dest_id}")
+    else:
+        # Select random pair
+        logger.info("ROTD: No configured pair, selecting random airports")
+        try:
+            pair = await asyncio.wait_for(
+                asyncio.to_thread(rotd_service._select_candidate_pair),
+                timeout=45,
+            )
+        except asyncio.TimeoutError:
+            logger.error("ROTD: Random selection timed out")
+            return
+        
+        if not pair:
+            logger.warning("ROTD: Could not find valid random pair; skipping")
+            return
+        
+        origin_id, dest_id = pair
+    
+    # Generate payload
+    try:
+        payload = await asyncio.wait_for(
+            asyncio.to_thread(rotd_service.generate_payload, origin_id, dest_id),
+            timeout=25,
+        )
+    except asyncio.TimeoutError:
+        logger.error("ROTD: generate_payload timed out")
+        return
+    
+    if not payload:
+        logger.info("ROTD: No payload generated; skipping post")
+        return
+    
+    text = format_rotd_text(payload)
+    # Discord limits messages to 2000 chars; chunk if needed
+    async def _send_chunked(cid: int, content: str, limit: int = 1900):
+        lines = content.split('\n')
+        chunk = ''
+        for line in lines:
+            if len(chunk) + len(line) + 1 > limit:
+                await send_message_with_retry(bot, cid, content=chunk)
+                chunk = ''
+            chunk += (('\n' if chunk else '') + line)
+        if chunk:
+            await send_message_with_retry(bot, cid, content=chunk)
+    await _send_chunked(channel_id, text)
+
+@bot.command(name='randomroute', help='Generate and post a Route of the Day once. Usage: !randomroute [origin_id] [dest_id]')
+async def randomroute_command(ctx, origin_id: int = None, dest_id: int = None):
+    try:
+        channel_id = Config.get_rrotd_channel_id()
+        if not channel_id:
+            await ctx.send("❌ ROTD channel not configured. Set DISCORD_RROTD_CHANNEL in .env.")
+            return
+        
+        # Resolve pair: prefer command args, then env pair, finally random selection
+        if origin_id is not None and dest_id is not None:
+            pair = (origin_id, dest_id)
+        elif origin_id is None and dest_id is None:
+            # No args provided - select random pair
+            await ctx.send("🎲 Selecting random airport pair...")
+            try:
+                pair = await asyncio.wait_for(
+                    asyncio.to_thread(rotd_service._select_candidate_pair),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                await ctx.send("⏳ Random selection timed out. Please try again.")
+                return
+            if not pair:
+                await ctx.send("❌ Could not find a valid random airport pair. Try providing specific IDs.")
+                return
+        else:
+            # Only one ID provided - try env pair as fallback
+            pair = Config.get_rotd_pair()
+            if not pair:
+                await ctx.send("⚠️ Please provide both origin and destination IDs, or none for random selection.\nUsage: `!randomroute 3803 3358` or `!randomroute`")
+                return
+        
+        origin_id, dest_id = pair
+        # Offload blocking HTTP work to a thread and enforce a timeout
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(rotd_service.generate_payload, origin_id, dest_id),
+                timeout=25,
+            )
+        except asyncio.TimeoutError:
+            await ctx.send("⏳ ROTD generation timed out. Please try again later.")
+            return
+        if not payload:
+            await ctx.send("❌ Could not generate route at this time.")
+            return
+        text = format_rotd_text(payload)
+        
+        # Build friendly airport names for acknowledgement
+        origin_name = f"{payload.get('a_name', 'Airport')} ({payload.get('a_code', '?')})"
+        dest_name = f"{payload.get('b_name', 'Airport')} ({payload.get('b_code', '?')})"
+        
+        # Post to configured target channel; acknowledge in invoking channel
+        await ctx.send(f"✈️ Posting route {origin_name} → {dest_name} to <#{channel_id}> …")
+        # Chunk and send
+        lines = text.split('\n')
+        chunk = ''
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 1900:
+                await send_message_with_retry(bot, channel_id, content=chunk)
+                chunk = ''
+            chunk += (('\n' if chunk else '') + line)
+        if chunk:
+            await send_message_with_retry(bot, channel_id, content=chunk)
+    except Exception as e:
+        logger.error(f"randomroute command failed: {e}", exc_info=True)
+        await ctx.send(f"❌ Error: {e}")
 
 async def send_unified_oil_price_message(price_data, change_event=None, is_update=False):
     """Unified function to send oil price information in consistent format"""

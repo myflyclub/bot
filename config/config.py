@@ -36,6 +36,26 @@ class Config:
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
+    # ROTD Feature Configuration
+    ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
+    ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
+    # Optional immediate run via CLI flag handled in bot; keep env for CI toggles
+    ROTD_ONCE_ENV = os.getenv('ROTD_ONCE', 'false').lower() == 'true'
+
+    # Optional explicit test pair for ROTD
+    ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
+    ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')
+
+    @classmethod
+    def get_rotd_pair(cls):
+        """Return explicit ROTD origin/dest IDs if provided and valid."""
+        try:
+            if cls.ROTD_ORIGIN_ID and cls.ROTD_DEST_ID:
+                return int(cls.ROTD_ORIGIN_ID), int(cls.ROTD_DEST_ID)
+        except ValueError:
+            raise ValueError(f"Invalid ROTD_ORIGIN_ID/ROTD_DEST_ID: {cls.ROTD_ORIGIN_ID}/{cls.ROTD_DEST_ID}")
+        return None
+
     # Crash Handler Configuration
     MAX_RESTART_ATTEMPTS = int(os.getenv('MAX_RESTART_ATTEMPTS', '5'))
     RESTART_DELAY_BASE = int(os.getenv('RESTART_DELAY_BASE', '10'))  # seconds
