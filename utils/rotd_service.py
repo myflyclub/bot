@@ -64,7 +64,7 @@ class ROTDService:
         - Retry up to max_attempts if validation fails
         """
         min_size = Config.ROTD_MIN_AIRPORT_SIZE
-        max_attempts = 20
+        max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
         
         # Initialize max ID if needed (one-time operation)
         max_id = self._initialize_max_id()
