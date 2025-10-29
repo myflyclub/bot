@@ -180,4 +180,3 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 /.cursor
-price_history.json
