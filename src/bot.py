@@ -90,14 +90,14 @@ async def on_ready():
     for guild in bot.guilds:
         logger.info(f'Connected to guild: {guild.name} (ID: {guild.id})')
         
-        # Check if configured channel exists in this guild
-        if Config.DISCORD_CHANNEL_ID:
-            channel = guild.get_channel(Config.get_channel_id())
+        # Check if oil price channel exists in this guild
+        if Config.DISCORD_OIL_CHANNEL:
+            channel = guild.get_channel(Config.get_oil_channel_id())
             if channel:
-                logger.info(f'Configured channel found: {channel.name} (ID: {channel.id})')
+                logger.info(f'Oil price channel found: {channel.name} (ID: {channel.id})')
                 logger.info(f'Channel permissions: {channel.permissions_for(guild.me)}')
             else:
-                logger.warning(f'Configured channel {Config.DISCORD_CHANNEL_ID} not found in guild {guild.name}')
+                logger.warning(f'Oil price channel {Config.DISCORD_OIL_CHANNEL} not found in guild {guild.name}')
     
     # Start passive monitoring immediately
     await start_passive_monitoring()
@@ -144,7 +144,7 @@ async def check_price_updates(ctx):
             await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
             
             # Auto-rename channel if configured
-            if Config.DISCORD_CHANNEL_ID:
+            if Config.DISCORD_OIL_CHANNEL:
                 await auto_rename_channel(change_event)
         else:
             # Send current price info using unified format
@@ -164,11 +164,11 @@ async def check_price_updates(ctx):
 
 async def auto_rename_channel(change_event):
     """Automatically rename the configured channel with the new oil price and direction indicator"""
-    if not Config.DISCORD_CHANNEL_ID:
+    if not Config.DISCORD_OIL_CHANNEL:
         return
     
     try:
-        channel_id = Config.get_channel_id()
+        channel_id = Config.get_oil_channel_id()
         target_channel = bot.get_channel(channel_id)
         
         if not target_channel:
@@ -240,7 +240,7 @@ async def start_passive_monitoring():
 
 async def fetch_and_send_current_price():
     """Fetch current price and send update to Discord channel"""
-    if not Config.DISCORD_CHANNEL_ID:
+    if not Config.DISCORD_OIL_CHANNEL:
         return
     
     try:
@@ -267,11 +267,11 @@ async def fetch_and_send_current_price():
 
 async def send_unified_oil_price_message(price_data, change_event=None, is_update=False):
     """Unified function to send oil price information in consistent format"""
-    if not Config.DISCORD_CHANNEL_ID:
+    if not Config.DISCORD_OIL_CHANNEL:
         return
     
     try:
-        channel_id = Config.get_channel_id()
+        channel_id = Config.get_oil_channel_id()
         target_channel = bot.get_channel(channel_id)
         
         if not target_channel:
@@ -408,7 +408,7 @@ async def background_monitoring():
                         # Continue monitoring even if channel rename fails
                     
                     # Send notification to configured channel with error handling
-                    if Config.DISCORD_CHANNEL_ID:
+                    if Config.DISCORD_OIL_CHANNEL:
                         try:
                             await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
                         except Exception as e:

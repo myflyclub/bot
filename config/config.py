@@ -9,7 +9,9 @@ class Config:
     
     # Discord Configuration
     DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-    DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
+    # New: separate channel IDs for oil and ROTD
+    DISCORD_OIL_CHANNEL = os.getenv('DISCORD_OIL_CHANNEL')
+    DISCORD_RROTD_CHANNEL = os.getenv('DISCORD_RROTD_CHANNEL')
     
     # Oil Price Monitoring Configuration
     OIL_PRICE_URL = os.getenv('OIL_PRICE_URL', 'https://play.myfly.club/oil-prices')
@@ -59,13 +61,23 @@ class Config:
         return True
     
     @classmethod
-    def get_channel_id(cls):
-        """Get the Discord channel ID as an integer"""
-        if cls.DISCORD_CHANNEL_ID:
+    def get_oil_channel_id(cls):
+        """Get the oil price Discord channel ID as an integer"""
+        if cls.DISCORD_OIL_CHANNEL:
             try:
-                return int(cls.DISCORD_CHANNEL_ID)
+                return int(cls.DISCORD_OIL_CHANNEL)
             except ValueError:
-                raise ValueError(f"Invalid DISCORD_CHANNEL_ID: {cls.DISCORD_CHANNEL_ID}")
+                raise ValueError(f"Invalid DISCORD_OIL_CHANNEL: {cls.DISCORD_OIL_CHANNEL}")
+        return None
+
+    @classmethod
+    def get_rrotd_channel_id(cls):
+        """Get the Route of the Day Discord channel ID as an integer"""
+        if cls.DISCORD_RROTD_CHANNEL:
+            try:
+                return int(cls.DISCORD_RROTD_CHANNEL)
+            except ValueError:
+                raise ValueError(f"Invalid DISCORD_RROTD_CHANNEL: {cls.DISCORD_RROTD_CHANNEL}")
         return None
 
     # Circuit Breaker Configuration
