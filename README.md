@@ -1,8 +1,24 @@
-# Oil Price Alert Discord Bot v2
+# MyFly Club Multitask Discord Bot v2
 
-A production-ready Discord bot that monitors oil prices from [play.myfly.club/oil-prices](https://play.myfly.club/oil-prices) with comprehensive crash recovery, health monitoring, and advanced error handling capabilities.
+A production-ready multitask Discord bot featuring **oil price monitoring** and **daily Route of the Day (ROTD)** from [MyFly Club](https://play.myfly.club) with comprehensive crash recovery, health monitoring, and advanced error handling capabilities.
 
 ## ✨ v2 Features
+
+### 🎯 **Multitask Bot Architecture**
+- **🛢️ Oil Price Monitoring**: Real-time monitoring and alerts for MyFly Club oil prices
+- **✈️ Route of the Day (ROTD)**: Daily random route generation with detailed flight information
+- **🔧 Extensible Design**: Clean separation for multiple independent features
+- **📱 Dual Channel Support**: Separate Discord channels for oil alerts and ROTD posts
+
+### ✈️ **Route of the Day (ROTD) Features**
+- **🎲 Random Route Selection**: Smart algorithm picks random valid airport pairs from MyFly Club
+- **📊 Comprehensive Route Data**: Distance, runway restrictions, demand statistics, and more
+- **🌍 Country Information**: Population, income, relationships, affinities, and flag emojis
+- **✈️ Detailed Itineraries**: Flight codes, aircraft types, duration, amenities, and pricing
+- **💰 Best Deals Highlighting**: Automatically identifies best price and most popular routes
+- **🏆 Airport Charms**: Display airport features and their strength ratings
+- **⚙️ Configurable Filters**: Minimum airport size and maximum retry attempts
+- **🧪 Manual Generation**: `!randomroute` command for on-demand route generation
 
 ### 🛡️ **Production Stability & Reliability**
 - **🔄 Automatic Crash Recovery**: Comprehensive crash detection with exponential backoff restart logic
@@ -23,6 +39,12 @@ A production-ready Discord bot that monitors oil prices from [play.myfly.club/oi
 - **📊 Rich Price Notifications**: Detailed Discord embeds with price changes and statistics
 - **🔍 JSON Endpoint Monitoring**: Efficient parsing of cycle-based price data
 - **📱 Manual Commands**: `!check`, `!health`, `!stats`, `!crash-stats` for monitoring and control
+
+### ✈️ **ROTD API Integration**
+- **🌐 Airport Data**: Full airport details including IATA codes, population, and features
+- **🔍 Route Search**: Itinerary discovery with pricing, carriers, and flight details
+- **📊 Research Data**: Demand statistics, country relationships, and economic indicators
+- **⚡ Circuit Breaker Protection**: Resilient API calls with automatic retry and failure handling
 
 ## Prerequisites
 
@@ -52,11 +74,12 @@ A production-ready Discord bot that monitors oil prices from [play.myfly.club/oi
 4. Copy the generated URL and open it in your browser
 5. Select your server and authorize the bot
 
-### 3. Get Channel ID
+### 3. Get Channel IDs
 
 1. Enable Developer Mode in Discord (User Settings → Advanced → Developer Mode)
-2. Right-click on the channel you want the bot to monitor
-3. Click "Copy ID"
+2. Right-click on the channel for oil price alerts and click "Copy ID"
+3. Right-click on the channel for Route of the Day and click "Copy ID"
+   - You can use the same channel for both features if desired
 
 ### 4. Clone and Setup Repository
 
@@ -91,11 +114,17 @@ pip install -r requirements.txt
 2. Edit `.env` file with your values:
    ```env
    DISCORD_TOKEN=your_bot_token_here
-   DISCORD_CHANNEL_ID=your_channel_id_here
+   DISCORD_OIL_CHANNEL=your_oil_channel_id_here
+   DISCORD_RROTD_CHANNEL=your_rotd_channel_id_here
    OIL_PRICE_URL=https://play.myfly.club/oil-prices
-   POLLING_INTERVAL=120
+   POLLING_INTERVAL=180
    BOT_PREFIX=!
    BOT_STATUS=Monitoring Oil Prices
+   
+   # Enable ROTD feature
+   ROTD_ENABLED=true
+   ROTD_MIN_AIRPORT_SIZE=3
+   ROTD_MAX_RETRY_ATTEMPTS=100
    ```
 
 ### 8. Run the Bot
@@ -162,24 +191,43 @@ After deployment, verify the bot is working correctly:
 
 ## How It Works (v2 Architecture)
 
-The bot operates with a sophisticated v2 architecture designed for production reliability:
+The bot operates with a sophisticated v2 multitask architecture designed for production reliability:
 
 ### 🏗️ **Supervised Execution**
 1. **Bot Supervisor** manages the main bot process with automatic restart capabilities
 2. **Crash Handler** detects failures and implements exponential backoff recovery
 3. **Health Monitor** continuously tracks bot performance and system status
 
-### 📊 **Smart Oil Price Monitoring**
+### �️ **Smart Oil Price Monitoring**
 1. **Fetches prices** from JSON endpoint every 3 minutes (configurable via `POLLING_INTERVAL`)
 2. **Circuit Breaker** protects against API failures with automatic recovery
 3. **Content Detection** uses hashing and cycle number comparison for efficiency
 4. **In-Memory Processing** eliminates file I/O for better performance (v2 improvement)
 
+### ✈️ **Route of the Day (ROTD) System**
+1. **Daily Scheduling**: Posts a new random route every 24 hours (8 AM UTC by default)
+2. **Smart Selection Algorithm**:
+   - Fetches max airport ID from MyFly Club API (one-time initialization)
+   - Generates random airport IDs within valid range
+   - Validates both airports meet minimum size requirements (configurable)
+   - Checks for available routes via search-route endpoint
+   - Retries up to 100 times (configurable) to find a valid pair
+3. **Data Aggregation**:
+   - Airport details (name, IATA code, population, income, features/charms)
+   - Route research (distance, demand, relationships, affinities)
+   - Itinerary search (carriers, pricing, aircraft, amenities, duration)
+4. **Rich Formatting**:
+   - Country flag emojis next to airport names
+   - Detailed flight information with icons and formatting
+   - Highlights best deals and most popular routes
+   - Professional Discord message format
+
 ### 💬 **Discord Integration**
-1. **Channel Renaming** with price and trend indicators (e.g., `oil-price💲76-28📈`)
-2. **Rich Notifications** with detailed price change information and UTC timestamps
-3. **Retry Logic** handles Discord API rate limits and transient failures
-4. **Emergency Alerts** for crash notifications with detailed diagnostics
+1. **Oil Price Channel**: Renames channel with price and trend indicators (e.g., `oil-price💲76-28📈`)
+2. **ROTD Channel**: Posts daily route with rich formatting and detailed information
+3. **Rich Notifications** with detailed price change information and UTC timestamps
+4. **Retry Logic** handles Discord API rate limits and transient failures
+5. **Emergency Alerts** for crash notifications with detailed diagnostics
 
 ## 🎮 Available Commands
 
@@ -188,6 +236,9 @@ The bot operates with a sophisticated v2 architecture designed for production re
 - **`!health`** - Display comprehensive bot health status
 - **`!stats`** - Show session statistics and monitoring metrics
 - **`!crash-stats`** - View crash recovery statistics and history
+
+### Route of the Day Commands
+- **`!randomroute`** - Generate and post a random route on demand (same as daily ROTD)
 
 ### Health Command Example
 ```
@@ -214,11 +265,11 @@ The bot operates with a sophisticated v2 architecture designed for production re
 ## 🏗️ Project Structure (v2)
 
 ```
-OilPriceAlert/
+MfcOilAlert/
 ├── src/
-│   └── bot.py                      # Main Discord bot with v2 integrations
+│   └── bot.py                      # Main Discord bot with multitask features
 ├── config/
-│   └── config.py                   # Configuration with v2 crash & circuit breaker settings
+│   └── config.py                   # Configuration with v2 + ROTD settings
 ├── utils/                          # v2 Enhanced utility modules
 │   ├── __init__.py
 │   ├── bot_supervisor.py           # 🔧 Bot lifecycle management & auto-restart
@@ -226,11 +277,18 @@ OilPriceAlert/
 │   ├── discord_client_wrapper.py   # 🌐 Discord API retry logic & rate limiting
 │   ├── health_status.py            # 🏥 Health monitoring & diagnostic aggregation
 │   ├── http_client.py              # ⚡ HTTP client with circuit breaker pattern
+│   ├── mfc_api.py                  # ✈️ MyFly Club API client for ROTD
+│   ├── rotd_service.py             # ✈️ Route of the Day selection & data aggregation
+│   ├── rotd_formatter.py           # ✈️ ROTD message formatting for Discord
 │   ├── price_monitor.py            # 📊 In-memory price monitoring (v2: no file I/O)
 │   └── price_parser.py             # 🔍 JSON response parser
-├── test_*.py                       # 🧪 Comprehensive v2 test suite (51+ tests)
+├── examples/                       # Example API responses for reference
+│   ├── airportExample.json
+│   ├── researchExample.json
+│   └── searchExample.json
+├── test_*.py                       # 🧪 Comprehensive v2 test suite
 ├── requirements.txt                # Python dependencies
-├── env.example                     # v2 Environment variables with crash & circuit breaker config
+├── env.example                     # v2 Environment variables with all features
 └── README.md                       # This documentation
 ```
 
@@ -242,6 +300,9 @@ OilPriceAlert/
 | **crash_handler.py** | Crash detection & recovery system | ✨ **NEW** - Discord alerts & error tracking |
 | **discord_client_wrapper.py** | Discord API resilience layer | ✨ **NEW** - Retry logic & rate limit handling |
 | **health_status.py** | Health monitoring & diagnostics | ✨ **NEW** - Real-time status aggregation |
+| **mfc_api.py** | MyFly Club API client | ✨ **NEW** - Airports, routes, and research endpoints |
+| **rotd_service.py** | Route of the Day logic | ✨ **NEW** - Smart random selection & data aggregation |
+| **rotd_formatter.py** | ROTD message formatting | ✨ **NEW** - Rich Discord message generation |
 | **http_client.py** | HTTP client with circuit breaker | 🔄 **ENHANCED** - Added circuit breaker pattern |
 | **price_monitor.py** | Price monitoring system | 🔄 **ENHANCED** - Pure in-memory architecture |
 
@@ -251,11 +312,22 @@ OilPriceAlert/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DISCORD_TOKEN` | Your Discord bot token | **Required** |
-| `DISCORD_CHANNEL_ID` | Target channel ID | **Required** |
+| `DISCORD_OIL_CHANNEL` | Oil price alerts channel ID | Optional |
+| `DISCORD_RROTD_CHANNEL` | Route of the Day channel ID | Optional |
 | `OIL_PRICE_URL` | Oil price JSON endpoint | `https://play.myfly.club/oil-prices` |
 | `POLLING_INTERVAL` | Price check interval (seconds) | `180` (3 minutes) |
 | `BOT_PREFIX` | Command prefix | `!` |
 | `BOT_STATUS` | Bot status message | `Monitoring Oil Prices` |
+
+### ✈️ Route of the Day (ROTD) Configuration
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ROTD_ENABLED` | Enable/disable ROTD feature | `false` |
+| `ROTD_MIN_AIRPORT_SIZE` | Minimum airport size filter (1-5) | `3` |
+| `ROTD_MAX_RETRY_ATTEMPTS` | Max attempts to find valid route | `100` |
+| `ROTD_ONCE` | Run ROTD once and exit (env override) | `false` |
+| `ROTD_ORIGIN_ID` | Test mode: specific origin airport ID | Empty (random) |
+| `ROTD_DEST_ID` | Test mode: specific destination airport ID | Empty (random) |
 
 ### 🛡️ v2 Crash Recovery Configuration
 | Variable | Description | Default |
@@ -276,7 +348,8 @@ OilPriceAlert/
 ```env
 # Discord Bot Configuration
 DISCORD_TOKEN=your_discord_bot_token_here
-DISCORD_CHANNEL_ID=your_target_channel_id_here
+DISCORD_OIL_CHANNEL=your_oil_channel_id_here
+DISCORD_RROTD_CHANNEL=your_rrotd_channel_id_here
 
 # Oil Price Monitoring
 OIL_PRICE_URL=https://play.myfly.club/oil-prices
@@ -285,6 +358,14 @@ POLLING_INTERVAL=180  # 3 minutes
 # Bot Settings
 BOT_PREFIX=!
 BOT_STATUS=Monitoring Oil Prices
+
+# Route of the Day (ROTD)
+ROTD_ENABLED=true
+ROTD_MIN_AIRPORT_SIZE=3
+ROTD_MAX_RETRY_ATTEMPTS=100
+ROTD_ONCE=false
+ROTD_ORIGIN_ID=
+ROTD_DEST_ID=
 
 # v2 Crash Recovery System
 MAX_RESTART_ATTEMPTS=5
@@ -300,7 +381,7 @@ CB_HALF_OPEN_PROBES=1
 
 ## 🏛️ v2 Architecture Overview
 
-The v2 architecture is designed for production reliability with comprehensive error handling and monitoring:
+The v2 architecture is designed for production reliability with comprehensive error handling, monitoring, and multitask support:
 
 ### 🔧 **Supervision Layer**
 - **Bot Supervisor** (`bot_supervisor.py`): Process-level management with automatic restart
@@ -308,16 +389,19 @@ The v2 architecture is designed for production reliability with comprehensive er
 - **Health Aggregator** (`health_status.py`): Real-time system diagnostics and metrics
 
 ### 📊 **Core Application Layer**
-- **Discord Bot** (`src/bot.py`): Main application with v2 integrations and command handling
+- **Discord Bot** (`src/bot.py`): Main multitask application with v2 integrations and command handling
 - **Price Monitor** (`price_monitor.py`): In-memory price tracking with session statistics
 - **Price Parser** (`price_parser.py`): JSON response parsing and cycle-based price extraction
+- **ROTD Service** (`rotd_service.py`): Random route selection and data aggregation
+- **ROTD Formatter** (`rotd_formatter.py`): Rich Discord message formatting for routes
 
 ### 🌐 **Network & API Layer**
 - **HTTP Client** (`http_client.py`): Smart polling with circuit breaker pattern
+- **MFC API Client** (`mfc_api.py`): MyFly Club API wrapper with retry logic
 - **Discord Wrapper** (`discord_client_wrapper.py`): Retry logic and rate limit handling
-- **Configuration** (`config/config.py`): Environment-based settings with v2 parameters
+- **Configuration** (`config/config.py`): Environment-based settings with v2 + ROTD parameters
 
-### 🔄 **Data Flow (v2 In-Memory)**
+### 🔄 **Data Flow (v2 Multitask Architecture)**
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Bot Supervisor │    │   Crash Handler  │    │  Health Monitor │
@@ -325,16 +409,34 @@ The v2 architecture is designed for production reliability with comprehensive er
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Discord Bot   │    │  Price Monitor   │    │   HTTP Client   │
-│   (Commands)    │◀──▶│  (In-Memory)     │◀──▶│ (Circuit Breaker)│
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│ Discord Wrapper │    │  Price Parser    │    │  Oil Price API  │
-│ (Retry Logic)   │    │  (JSON Parsing)  │    │ (External API)  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Discord Bot (Main)                          │
+│                    (Multitask Coordinator)                       │
+└─────────────────────────────────────────────────────────────────┘
+         │                                          │
+         ▼                                          ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│  Oil Price Monitor   │              │    ROTD Service          │
+│   (Feature 1)        │              │    (Feature 2)           │
+└──────────────────────┘              └──────────────────────────┘
+         │                                          │
+         ▼                                          ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│   Price Parser       │              │   MFC API Client         │
+│   (JSON Parsing)     │              │   (Airports/Routes)      │
+└──────────────────────┘              └──────────────────────────┘
+         │                                          │
+         ▼                                          ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│   HTTP Client        │◀─────────────│   ROTD Formatter         │
+│ (Circuit Breaker)    │              │ (Discord Messages)       │
+└──────────────────────┘              └──────────────────────────┘
+         │                                          │
+         ▼                                          ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│  Oil Price API       │              │  MyFly Club API          │
+│ (External API)       │              │  (External API)          │
+└──────────────────────┘              └──────────────────────────┘
 ```
 
 ### 🛡️ **Resilience Features**
@@ -346,6 +448,7 @@ The v2 architecture is designed for production reliability with comprehensive er
 
 ## Message Format
 
+### Oil Price Updates
 All price updates use a unified format:
 ```
 🔄 Oil Price Updated!
@@ -357,12 +460,55 @@ Automatic price update detected
 ⏰ Time: 14:30 UTC
 ```
 
+### Route of the Day (ROTD) Format
+Daily routes are posted with comprehensive information:
+```
+Random Route of the Day: 29 October 2025
+
+Stockholm Arlanda Airport (ARN) 🇸🇪 - Singapore Changi Airport (SIN) 🇸🇬
+
+Distance (direct): 9,875 km
+Runway Restriction: 3,700m (SIN)
+Population: 2,584,392 / 5,935,053
+Income per Capita, PPP: $85,957 / $94,100
+Relationship between Countries: 1 (Good)
+Affinities: +1: Trade Relations
+Flight Type: International
+Direct Demand: 114 / 7 / –
+
+No existing direct links
+
+Tickets
+
+Best Deal
+ARN - HEL - SIN — $738 (Economy)
+🛫 ARN - HEL 🛫
+Finnair - AY 768 | Airbus A320neo | Duration: 55 minutes | $89 (Economy) with 65 quality including IFE, wifi
+🛫 HEL - SIN 🛫
+Finnair - AY 095 | Airbus A350-900 | Duration: 11 hours 30 minutes | $649 (Economy) with 82 quality including hot meal service, IFE, power outlet
+
+Best Seller
+ARN - DOH - SIN — $856 (Economy)
+🛫 ARN - DOH 🛫
+Qatar Airways - QR 170 | Boeing 787-9 | Duration: 6 hours 35 minutes | $499 (Economy) with 89 quality including hot meal service, IFE, wifi
+🛫 DOH - SIN 🛫
+Qatar Airways - QR 944 | Airbus A350-1000 | Duration: 7 hours 40 minutes | $357 (Economy) with 89 quality including hot meal service, IFE, power outlet
+```
+
 ## 🔧 Troubleshooting
 
 ### Bot Connection Issues
 - **Token Problems**: Check if your `DISCORD_TOKEN` is correct in `.env`
 - **Permission Errors**: Ensure bot has "Manage Channels" and "Send Messages" permissions
-- **Channel Access**: Verify bot can see the target channel specified in `DISCORD_CHANNEL_ID`
+- **Channel Access**: Verify bot can see the channels specified in `DISCORD_OIL_CHANNEL` and `DISCORD_RROTD_CHANNEL`
+
+### ROTD Issues
+- **Not Posting**: Check that `ROTD_ENABLED=true` in `.env`
+- **No Valid Routes Found**: Increase `ROTD_MAX_RETRY_ATTEMPTS` (default: 100)
+- **Airport Size Issues**: Lower `ROTD_MIN_AIRPORT_SIZE` to include smaller airports (minimum: 1)
+- **Manual Testing**: Use `!randomroute` command to test route generation on demand
+- **Specific Route Testing**: Set `ROTD_ORIGIN_ID` and `ROTD_DEST_ID` in `.env` to test with specific airports
+- **API Errors**: Check logs for MyFly Club API connectivity issues
 
 ### v2 Crash Recovery Issues
 - **Restart Loops**: Check `!crash-stats` to see restart attempts and reasons
@@ -395,7 +541,7 @@ Automatic price update detected
 ## 🎯 v2 Summary & Production Readiness
 
 ### ✅ **What's New in v2**
-The Oil Price Alert Discord Bot v2 represents a complete production-ready rewrite with enterprise-grade reliability:
+The MyFly Club Multitask Discord Bot v2 represents a complete production-ready rewrite with enterprise-grade reliability and multitask capabilities:
 
 - **🛡️ Comprehensive Crash Recovery**: Automatic restart with exponential backoff and Discord alerting
 - **💾 In-Memory Architecture**: Zero file dependencies for improved performance and reliability  
@@ -403,13 +549,17 @@ The Oil Price Alert Discord Bot v2 represents a complete production-ready rewrit
 - **🏥 Health Monitoring**: Real-time diagnostics with `!health`, `!stats`, and `!crash-stats` commands
 - **🌐 Discord API Resilience**: Advanced retry logic with rate limit handling and backoff strategies
 - **🔧 Supervised Execution**: Process-level management for 24/7 production deployment
+- **✈️ Route of the Day (ROTD)**: Daily random route generation with rich flight information from MyFly Club
+- **🎯 Multitask Architecture**: Clean separation for multiple independent features with extensibility
 
 ### 🚀 **Production Ready Features**
 - **99%+ Uptime**: Automatic recovery from crashes and network failures
+- **Dual Feature Support**: Independent oil price monitoring and daily route generation
 - **Instant Monitoring**: Real-time health checks and performance metrics
 - **Zero Maintenance**: Self-healing architecture with comprehensive error handling
 - **Scalable Design**: In-memory operation suitable for containerized deployments
-- **Comprehensive Testing**: 51+ automated tests covering all v2 functionality
+- **Comprehensive Testing**: Automated tests covering all v2 functionality
+- **Rich Discord Integration**: Separate channels, formatted messages, and emoji support
 
 ### 📊 **Deployment Confidence**
 The v2 bot has been thoroughly tested and validated for production use:
@@ -417,8 +567,19 @@ The v2 bot has been thoroughly tested and validated for production use:
 - **Network Resilience**: Validated against API failures, rate limits, and connectivity issues  
 - **Performance**: Benchmarked for memory usage, response times, and long-term stability
 - **Integration**: Full end-to-end testing of all v2 components working together
+- **ROTD System**: Validated route selection algorithm, API integration, and message formatting
 
 **Ready for Production**: Deploy with confidence using `RUN_SUPERVISED=true` for maximum reliability.
+
+### ✈️ **ROTD Features**
+The Route of the Day system provides:
+- **Smart Random Selection**: Intelligent algorithm finds valid airport pairs efficiently
+- **Comprehensive Data**: Distance, demand, pricing, relationships, and more
+- **Rich Formatting**: Country flags, flight details, amenities, and professional layout
+- **Best Deal Highlighting**: Automatically identifies best price and most popular routes
+- **Flexible Configuration**: Adjustable airport size filters and retry limits
+- **On-Demand Generation**: `!randomroute` command for manual route generation anytime
+- **Testing Support**: Specific route testing with `ROTD_ORIGIN_ID` and `ROTD_DEST_ID`
 
 ## 📄 License
 
