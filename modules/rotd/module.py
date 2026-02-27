@@ -117,15 +117,23 @@ class RotdModule:
 
     def _next_scheduled_run_utc(self) -> datetime:
         """Return next schedule execution as UTC datetime."""
-        tz_name = getattr(self.config, "ROTD_SCHEDULE_TZ", "UTC") if self.config else "UTC"
+        tz_raw = getattr(self.config, "ROTD_SCHEDULE_TZ", "UTC") if self.config else "UTC"
+        tz_name = str(tz_raw or "UTC").split("#")[0].strip()
         hour = int(getattr(self.config, "ROTD_SCHEDULE_HOUR", 15)) if self.config else 15
         minute = int(getattr(self.config, "ROTD_SCHEDULE_MINUTE", 0)) if self.config else 0
 
-        try:
-            local_tz = ZoneInfo(tz_name)
-        except Exception:
-            self.logger.warning("Invalid ROTD_SCHEDULE_TZ=%s, falling back to UTC", tz_name)
+        if tz_name.upper() in {"UTC", "ETC/UTC", "Z"}:
             local_tz = timezone.utc
+        else:
+            try:
+                local_tz = ZoneInfo(tz_name)
+            except Exception as e:
+                self.logger.warning(
+                    "Could not load ROTD_SCHEDULE_TZ=%s (%s), falling back to UTC",
+                    tz_name,
+                    e.__class__.__name__,
+                )
+                local_tz = timezone.utc
 
         now_local = datetime.now(local_tz)
         target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
