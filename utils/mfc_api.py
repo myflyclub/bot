@@ -89,7 +89,7 @@ class MyFlyApiClient:
             half_open_probes=Config.CB_HALF_OPEN_PROBES,
         )
 
-    def _get(self, path: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
+    def _get(self, path: str, timeout: int = 30) -> Optional[Any]:
         if not self.breaker.before_request():
             logger.warning("ROTD breaker open; skipping request %s", path)
             return None
@@ -121,6 +121,13 @@ class MyFlyApiClient:
     def get_all_airports(self) -> Optional[list]:
         """Fetch the complete list of airports. Returns list of airport dicts."""
         result = self._get("/airports")
+        if result and isinstance(result, list):
+            return result
+        return None
+
+    def get_airplane_models(self) -> Optional[list]:
+        """Fetch airplane models from the global endpoint (no auth required)."""
+        result = self._get("/airplane-models")
         if result and isinstance(result, list):
             return result
         return None

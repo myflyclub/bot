@@ -23,28 +23,23 @@ class BotRuntime:
 
         if not getattr(self.bot, "_slash_synced", False):
             try:
+                if bool(getattr(self.config, "CLEAR_GUILD_COMMANDS_ON_STARTUP", False)):
+                    for guild in self.bot.guilds:
+                        try:
+                            self.bot.tree.clear_commands(guild=guild)
+                            await self.bot.tree.sync(guild=guild)
+                            self.logger.info("Cleared guild slash command(s) for %s (%s)", guild.name, guild.id)
+                        except Exception as guild_error:
+                            self.logger.warning(
+                                "Failed clearing guild commands for %s (%s): %s",
+                                guild.name,
+                                guild.id,
+                                guild_error,
+                            )
                 await self.app_instance.register_commands(self.bot.tree)
                 synced = await self.bot.tree.sync()
                 self.bot._slash_synced = True
                 self.logger.info("Synced %s global slash command(s)", len(synced))
-                # Also sync per-guild for faster command availability during development.
-                for guild in self.bot.guilds:
-                    try:
-                        self.bot.tree.copy_global_to(guild=guild)
-                        guild_synced = await self.bot.tree.sync(guild=guild)
-                        self.logger.info(
-                            "Synced %s guild slash command(s) for %s (%s)",
-                            len(guild_synced),
-                            guild.name,
-                            guild.id,
-                        )
-                    except Exception as guild_error:
-                        self.logger.warning(
-                            "Guild command sync failed for %s (%s): %s",
-                            guild.name,
-                            guild.id,
-                            guild_error,
-                        )
             except Exception as e:
                 self.logger.error("Failed to sync slash commands: %s", e)
 

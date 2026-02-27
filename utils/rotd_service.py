@@ -3,35 +3,41 @@ Route of the Day (ROTD) service: selects a route, gathers data from MyFly endpoi
 and produces a normalized payload for formatting.
 
 Design goals:
-- Avoid Airports endpoint unless it's strictly necessary. Charms can be omitted for v1 and added later if needed.
+- Use Airports lookups only when needed (selection/runway) and keep them cached in-memory.
 - Use MyFly search-route and research-link as primary sources.
 """
 import logging
 import random
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, List
 
 from config.config import Config
+from shared.formatting import country_flag, relationship_text
 from utils.mfc_api import create_mfc_client
 
 logger = logging.getLogger(__name__)
-
-
-def _pick_flags(country_code_a: str, country_code_b: str) -> Tuple[str, str]:
-    # Minimal: map ISO alpha-2 to flag emoji (naive). If missing, return empty.
-    def flag(cc):
-        if not cc or len(cc) != 2:
-            return ""
-        base = 127397
-        return chr(base + ord(cc[0].upper())) + chr(base + ord(cc[1].upper()))
-    return flag(country_code_a), flag(country_code_b)
-
-
 class ROTDService:
     def __init__(self):
         self.client = create_mfc_client()
         self._max_airport_id: Optional[int] = None
-        self._initialized = False
+        self._airport_cache: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+        self._airport_cache_ttl_seconds: int = 600
+
+    def _get_airport_cached(self, airport_id: int) -> Optional[Dict[str, Any]]:
+        now_ts = time.time()
+        cached = self._airport_cache.get(airport_id)
+        if cached:
+            expires_at, payload = cached
+            if expires_at >= now_ts:
+                return payload
+            self._airport_cache.pop(airport_id, None)
+
+        payload = self.client.get_airport(airport_id)
+        if isinstance(payload, dict) and payload:
+            self._airport_cache[airport_id] = (now_ts + self._airport_cache_ttl_seconds, payload)
+            return payload
+        return None
 
     def _initialize_max_id(self) -> int:
         """Fetch the maximum airport ID once at initialization."""
@@ -44,6 +50,12 @@ class ROTDService:
         if airports and isinstance(airports, list):
             max_id = max(apt.get('id', 0) for apt in airports if apt.get('id'))
             self._max_airport_id = max_id
+            now_ts = time.time()
+            for apt in airports:
+                if isinstance(apt, dict):
+                    apt_id = apt.get('id')
+                    if isinstance(apt_id, int):
+                        self._airport_cache[apt_id] = (now_ts + self._airport_cache_ttl_seconds, apt)
             logger.info(f"ROTD: Found {len(airports)} airports, max ID: {max_id}")
             return max_id
         else:
@@ -61,17 +73,65 @@ class ROTDService:
         - Generate random IDs within range [1, max_id]
         - Validate both airports exist and meet size requirements
         - Validate the pair has available routes via search-route
-        - Retry up to max_attempts if validation fails
+        - Retry until a valid pair is found (or abort if API health fails)
         """
         min_size = Config.ROTD_MIN_AIRPORT_SIZE
-        max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
+        min_distance_km = Config.ROTD_MIN_DISTANCE_KM
+        configured_max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
+        safety_floor_attempts = 5000
+        effective_max_attempts = max(configured_max_attempts, safety_floor_attempts)
         
         # Initialize max ID if needed (one-time operation)
         max_id = self._initialize_max_id()
         
-        logger.info(f"ROTD: Searching for random airport pair (ID range: 1-{max_id}, min_size={min_size})")
-        
-        for attempt in range(max_attempts):
+        logger.info(
+            "ROTD: Searching for random airport pair "
+            f"(ID range: 1-{max_id}, phase1={min_size}/{min_size} <=50, "
+            f"phase2={min_size}/{max(2, min_size - 1)} <=100, "
+            f"phase3={max(2, min_size - 1)}/{max(2, min_size - 1)} >100, "
+            f"min_distance_km={min_distance_km}, "
+            f"configured_max_attempts={configured_max_attempts}, effective_max_attempts={effective_max_attempts})"
+        )
+
+        if configured_max_attempts < safety_floor_attempts:
+            logger.info(
+                "ROTD: ROTD_MAX_RETRY_ATTEMPTS=%s raised to safety floor=%s",
+                configured_max_attempts,
+                safety_floor_attempts,
+            )
+
+        attempt_no = 0
+        while True:
+            # If API is unhealthy (breaker open), stop trying and let caller skip this cycle.
+            if getattr(self.client.breaker, "state", None) == "open":
+                logger.warning("ROTD: API circuit breaker is open; aborting random pair selection")
+                return None
+
+            attempt_no += 1
+            if attempt_no > effective_max_attempts:
+                logger.warning(
+                    "ROTD: Could not find valid random airport pair after %s attempts (safety limit reached)",
+                    effective_max_attempts,
+                )
+                return None
+            if attempt_no <= 50:
+                min_size_origin = min_size
+                min_size_dest = min_size
+            elif attempt_no <= 100:
+                min_size_origin = min_size
+                min_size_dest = max(2, min_size - 1)
+            else:
+                min_size_origin = max(2, min_size - 1)
+                min_size_dest = max(2, min_size - 1)
+
+            if attempt_no % 250 == 0:
+                logger.info(
+                    "ROTD: still searching after %s attempts (current thresholds origin=%s dest=%s)",
+                    attempt_no,
+                    min_size_origin,
+                    min_size_dest,
+                )
+
             # Generate two different random IDs
             origin_id = random.randint(1, max_id)
             dest_id = random.randint(1, max_id)
@@ -81,47 +141,80 @@ class ROTDService:
             
             # Validate both airports exist and meet size requirements
             try:
-                origin_airport = self.client.get_airport(origin_id)
+                origin_airport = self._get_airport_cached(origin_id)
                 if not origin_airport:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {origin_id} not found")
+                    logger.debug(f"ROTD attempt {attempt_no}: Airport {origin_id} not found")
                     continue
                 
                 origin_size = origin_airport.get('size', 0)
-                if origin_size < min_size:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {origin_id} size {origin_size} < {min_size}")
+                if origin_size < min_size_origin:
+                    logger.debug(
+                        f"ROTD attempt {attempt_no}: Airport {origin_id} size {origin_size} < {min_size_origin} (origin)"
+                    )
                     continue
                 
-                dest_airport = self.client.get_airport(dest_id)
+                dest_airport = self._get_airport_cached(dest_id)
                 if not dest_airport:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {dest_id} not found")
+                    logger.debug(f"ROTD attempt {attempt_no}: Airport {dest_id} not found")
                     continue
                 
                 dest_size = dest_airport.get('size', 0)
-                if dest_size < min_size:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {dest_id} size {dest_size} < {min_size}")
+                if dest_size < min_size_dest:
+                    logger.debug(
+                        f"ROTD attempt {attempt_no}: Airport {dest_id} size {dest_size} < {min_size_dest} (dest)"
+                    )
                     continue
                 
                 # Validate routes exist
                 route = self.client.search_route(origin_id, dest_id)
                 if route and isinstance(route, list) and len(route) > 0:
+                    research = self.client.research_link(origin_id, dest_id)
+                    distance_raw = research.get("distance") if isinstance(research, dict) else None
+                    try:
+                        distance_km = float(distance_raw)
+                    except (TypeError, ValueError):
+                        logger.debug(
+                            "ROTD attempt %s: Missing/invalid distance for %s->%s (%r)",
+                            attempt_no,
+                            origin_id,
+                            dest_id,
+                            distance_raw,
+                        )
+                        continue
+                    if distance_km < float(min_distance_km):
+                        logger.debug(
+                            "ROTD attempt %s: Distance %.0f km below minimum %s km for %s->%s",
+                            attempt_no,
+                            distance_km,
+                            min_distance_km,
+                            origin_id,
+                            dest_id,
+                        )
+                        continue
                     origin_iata = origin_airport.get('iata', '?')
                     dest_iata = dest_airport.get('iata', '?')
-                    logger.info(f"ROTD: Found valid pair after {attempt+1} attempts: {origin_id} ({origin_iata}) -> {dest_id} ({dest_iata})")
+                    logger.info(
+                        "ROTD: Found valid pair after %s attempts: %s (%s) -> %s (%s), distance=%.0f km",
+                        attempt_no,
+                        origin_id,
+                        origin_iata,
+                        dest_id,
+                        dest_iata,
+                        distance_km,
+                    )
                     return (origin_id, dest_id)
                 else:
-                    logger.debug(f"ROTD attempt {attempt+1}: No routes for {origin_id}->{dest_id}")
+                    logger.debug(f"ROTD attempt {attempt_no}: No routes for {origin_id}->{dest_id}")
             
             except Exception as e:
-                logger.debug(f"ROTD attempt {attempt+1}: Validation error for {origin_id}->{dest_id}: {e}")
+                logger.debug(f"ROTD attempt {attempt_no}: Validation error for {origin_id}->{dest_id}: {e}")
                 continue
-        
-        logger.warning(f"ROTD: Could not find valid random airport pair after {max_attempts} attempts")
-        return None
 
     def generate_payload(self, origin_id: int, dest_id: int) -> Optional[Dict[str, Any]]:
         """Fetch data from MyFly endpoints and construct normalized payload.
 
-        This method relies only on search-route and research-link, avoiding airports endpoint.
+        Primary sources are search-route and research-link; airports/{id} is used
+        only for runway enrichment and served from in-memory cache when available.
         """
         route = self.client.search_route(origin_id, dest_id)
         research = self.client.research_link(origin_id, dest_id)
@@ -140,18 +233,33 @@ class ROTDService:
 
         # Extract from research-link which uses fromAirport* and toAirport* prefixes
         a_name = research.get('fromAirportText', '').split('(')[0] if research.get('fromAirportText') else f"Airport {origin_id}"
-        a_code = research.get('fromAirportIata', '—')
+        a_code = research.get('fromAirportIata', '-')
         a_country = research.get('fromAirportCountryCode', '')
         
         b_name = research.get('toAirportText', '').split('(')[0] if research.get('toAirportText') else f"Airport {dest_id}"
-        b_code = research.get('toAirportIata', '—')
+        b_code = research.get('toAirportIata', '-')
         b_country = research.get('toAirportCountryCode', '')
 
-        flag_a, flag_b = _pick_flags(a_country, b_country)
+        flag_a, flag_b = country_flag(a_country), country_flag(b_country)
 
         # Distance/runway/population/income from research
         distance_km = research.get('distance', 0)
-        runway_restriction = "—"  # Not in research payload
+        runway_restriction = "N/A"
+        try:
+            origin_airport = self._get_airport_cached(origin_id) or {}
+            dest_airport = self._get_airport_cached(dest_id) or {}
+            origin_runway = origin_airport.get("runwayLength")
+            dest_runway = dest_airport.get("runwayLength")
+            if isinstance(origin_runway, (int, float)) and isinstance(dest_runway, (int, float)):
+                shortest = int(min(origin_runway, dest_runway))
+                runway_restriction = f"{shortest:,} m"
+            elif isinstance(origin_runway, (int, float)):
+                runway_restriction = f"{int(origin_runway):,} m"
+            elif isinstance(dest_runway, (int, float)):
+                runway_restriction = f"{int(dest_runway):,} m"
+        except Exception:
+            # Keep payload resilient if runway lookup fails.
+            runway_restriction = "N/A"
         pop_a = research.get('fromAirportPopulation', 0)
         pop_b = research.get('toAirportPopulation', 0)
         income_ppp_a = research.get('fromAirportIncome', 0)
@@ -159,16 +267,9 @@ class ROTDService:
 
         # Relationship and affinities
         mutual_rel = research.get('mutualRelationship', 0)
-        if mutual_rel >= 2:
-            relation_text = f"{mutual_rel} (Excellent)"
-        elif mutual_rel >= 1:
-            relation_text = f"{mutual_rel} (Good)"
-        elif mutual_rel <= -1:
-            relation_text = f"{mutual_rel} (Poor)"
-        else:
-            relation_text = f"{mutual_rel} (Neutral)"
+        relation_text = relationship_text(mutual_rel, default="0 (Neutral)")
         
-        affinities_text = research.get('affinity', '—')
+        affinities_text = research.get('affinity', '-')
         
         flight_type = research.get('flightType', 'Domestic')
         
@@ -178,10 +279,10 @@ class ROTDService:
             econ = dd.get('economy', 0)
             biz = dd.get('business', 0)
             fst = dd.get('first')
-            fst_str = f"{fst}" if fst is not None else "–"
+            fst_str = f"{fst}" if fst is not None else "-"
             direct_demand = f"{econ} / {biz} / {fst_str}"
         else:
-            direct_demand = "—"
+            direct_demand = "-"
         # Detect direct presence - check if any route has BEST_DEAL and no connections
         has_direct = False
         if isinstance(route, list):
@@ -203,11 +304,11 @@ class ROTDService:
             
             segs = []
             for s in raw_segments:
-                from_code = s.get('fromAirportIata', '—')
-                to_code = s.get('toAirportIata', '—')
-                carrier = s.get('airlineName', '—')
-                flight_code = s.get('flightCode', '—')
-                aircraft = s.get('airplaneModelName', '—')
+                from_code = s.get('fromAirportIata', '-')
+                to_code = s.get('toAirportIata', '-')
+                carrier = s.get('airlineName', '-')
+                flight_code = s.get('flightCode', '-')
+                aircraft = s.get('airplaneModelName', '-')
                 duration_mins = s.get('duration', 0)
                 # Convert minutes to hours and minutes
                 if duration_mins:
@@ -218,10 +319,10 @@ class ROTDService:
                     else:
                         duration = f"{mins} minutes"
                 else:
-                    duration = '—'
-                price = s.get('price', '—')
-                cabin = s.get('linkClass', '—').title()
-                quality = s.get('computedQuality', '—')
+                    duration = '-'
+                price = s.get('price', '-')
+                cabin = s.get('linkClass', '-').title()
+                quality = s.get('computedQuality', '-')
                 features = s.get('features', [])
                 # Map features to friendly names
                 amenity_map = {
@@ -254,8 +355,9 @@ class ROTDService:
                 try:
                     total_price = sum(int(s.get('price', 0)) if isinstance(s.get('price'), (int, float)) else 0 for s in raw_segments)
                     cabin = segs[0]['cabin'] if segs else 'Economy'
-                    summary = f"{path} — ${total_price} ({cabin})"
-                except:
+                    summary = f"{path} - 💵 ${total_price} ({cabin})"
+                except Exception as e:
+                    logger.debug("ROTD: Failed to compute itinerary summary price for path %s: %s", path, e)
                     summary = path
             else:
                 summary = ""
@@ -309,3 +411,4 @@ class ROTDService:
             'best_seller': best_seller,
         }
         return payload
+

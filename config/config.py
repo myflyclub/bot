@@ -31,14 +31,48 @@ class Config:
     
     # Bot Configuration
     BOT_STATUS = os.getenv('BOT_STATUS', 'Monitoring Oil Prices')
+    CLEAR_GUILD_COMMANDS_ON_STARTUP = os.getenv('CLEAR_GUILD_COMMANDS_ON_STARTUP', 'false').lower() == 'true'
     
     # ROTD Feature Configuration
     ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
     ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
     ROTD_MAX_RETRY_ATTEMPTS = int(os.getenv('ROTD_MAX_RETRY_ATTEMPTS', '100'))
+    _rotd_min_distance_raw = os.getenv('ROTD_MIN_DISTANCE_KM', '5500')
+    try:
+        ROTD_MIN_DISTANCE_KM = int((_rotd_min_distance_raw or '5500').split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid ROTD_MIN_DISTANCE_KM '{_rotd_min_distance_raw}', using default 5500")
+        ROTD_MIN_DISTANCE_KM = 5500
+    if ROTD_MIN_DISTANCE_KM < 0:
+        print(f"Warning: ROTD_MIN_DISTANCE_KM '{ROTD_MIN_DISTANCE_KM}' must be >= 0, using default 5500")
+        ROTD_MIN_DISTANCE_KM = 5500
     # Optional explicit test pair for ROTD
     ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
     ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')
+    ROTD_SCHEDULE_ENABLED = os.getenv('ROTD_SCHEDULE_ENABLED', 'false').lower() == 'true'
+    ROTD_SCHEDULE_TZ = os.getenv('ROTD_SCHEDULE_TZ', 'UTC')
+    _rotd_hour_raw = os.getenv('ROTD_SCHEDULE_HOUR', '15')
+    _rotd_minute_raw = os.getenv('ROTD_SCHEDULE_MINUTE', '0')
+    try:
+        ROTD_SCHEDULE_HOUR = int((_rotd_hour_raw or '15').split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid ROTD_SCHEDULE_HOUR '{_rotd_hour_raw}', using default 15")
+        ROTD_SCHEDULE_HOUR = 15
+    try:
+        ROTD_SCHEDULE_MINUTE = int((_rotd_minute_raw or '0').split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid ROTD_SCHEDULE_MINUTE '{_rotd_minute_raw}', using default 0")
+        ROTD_SCHEDULE_MINUTE = 0
+    if ROTD_SCHEDULE_HOUR < 0 or ROTD_SCHEDULE_HOUR > 23:
+        print(f"Warning: ROTD_SCHEDULE_HOUR '{ROTD_SCHEDULE_HOUR}' out of range 0-23, using default 15")
+        ROTD_SCHEDULE_HOUR = 15
+    if ROTD_SCHEDULE_MINUTE < 0 or ROTD_SCHEDULE_MINUTE > 59:
+        print(f"Warning: ROTD_SCHEDULE_MINUTE '{ROTD_SCHEDULE_MINUTE}' out of range 0-59, using default 0")
+        ROTD_SCHEDULE_MINUTE = 0
+    
+    # Aviation info feature
+    AVIATION_INFO_ENABLED = os.getenv('AVIATION_INFO_ENABLED', 'true').lower() == 'true'
+    AVIATION_AIRPORT_ID_LOOKUP_ENABLED = os.getenv('AVIATION_AIRPORT_ID_LOOKUP_ENABLED', 'false').lower() == 'true'
 
     @classmethod
     def get_rotd_pair(cls):
