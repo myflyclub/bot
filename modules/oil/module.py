@@ -1,4 +1,4 @@
-"""
+﻿"""
 Oil feature module.
 
 Contains oil lifecycle, background monitoring, and slash commands.
@@ -250,24 +250,20 @@ class OilModule:
             return
         try:
             channel_id = self.config.get_oil_channel_id()
-            direction = ""
+            trend_emoji = "\U0001F4CA"  # 📊
             if change_event.event_type != "initial":
                 if change_event.price_change > 0:
-                    direction = "up"
+                    trend_emoji = "\U0001F4C8"  # 📈
                 elif change_event.price_change < 0:
-                    direction = "down"
+                    trend_emoji = "\U0001F4C9"  # 📉
 
             price_str = f"{change_event.new_price:.2f}"
             dollars, cents = price_str.split(".")
-            if direction == "up":
-                new_channel_name = f"oil-price up-{dollars}-{cents}"
-            elif direction == "down":
-                new_channel_name = f"oil-price down-{dollars}-{cents}"
-            else:
-                new_channel_name = f"oil-price {dollars}-{cents}"
+            money_emoji = "\U0001F4B2"  # 💲
+            new_channel_name = f"oil-price-{trend_emoji}{money_emoji}{dollars}-{cents}"
 
             if len(new_channel_name) > 100:
-                new_channel_name = f"oil {dollars}-{cents}"
+                new_channel_name = f"oil-{trend_emoji}{money_emoji}{dollars}-{cents}"
 
             success = await edit_channel_name_with_retry(self.bot, channel_id, new_channel_name)
             if not success:
@@ -281,31 +277,32 @@ class OilModule:
         channel_id = self.config.get_oil_channel_id()
 
         embed = discord.Embed(
-            title="🔄 Oil Price Updated!",
+            title="\U0001F504 Oil Price Updated!",  # 🔄
             description=("Automatic price update detected" if is_update else "Current price information"),
             color=discord.Color.green(),
         )
 
         if change_event and change_event.event_type != "initial":
-            embed.add_field(name="💰 Old Price", value=f"${change_event.old_price:.2f}", inline=True)
-            embed.add_field(name="💰 New Price", value=f"${change_event.new_price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{change_event.new_cycle}", inline=True)
+            embed.add_field(name="\U0001F4B0 Old Price", value=f"${change_event.old_price:.2f}", inline=True)  # 💰
+            embed.add_field(name="\U0001F4B0 New Price", value=f"${change_event.new_price:.2f}", inline=True)  # 💰
+            embed.add_field(name="\U0001F504 Cycle", value=f"{change_event.new_cycle}", inline=True)  # 🔄
             embed.add_field(
-                name="📊 Change",
+                name="\U0001F4CA Change",  # 📊
                 value=f"${change_event.price_change:+.2f} ({change_event.price_change_percent:+.2f}%)",
                 inline=True,
             )
         elif change_event and change_event.event_type == "initial":
-            embed.add_field(name="💰 New Price", value=f"${change_event.new_price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{change_event.new_cycle}", inline=True)
-            embed.add_field(name="📝 Type", value="Initial Price", inline=True)
+            embed.add_field(name="\U0001F4B0 New Price", value=f"${change_event.new_price:.2f}", inline=True)  # 💰
+            embed.add_field(name="\U0001F504 Cycle", value=f"{change_event.new_cycle}", inline=True)  # 🔄
+            embed.add_field(name="\U0001F4DD Type", value="Initial Price", inline=True)  # 📝
         else:
-            embed.add_field(name="💰 Current Price", value=f"${price_data.price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{price_data.cycle}", inline=True)
-            embed.add_field(name="📊 Status", value="No price change detected", inline=True)
+            embed.add_field(name="\U0001F4B0 Current Price", value=f"${price_data.price:.2f}", inline=True)  # 💰
+            embed.add_field(name="\U0001F504 Cycle", value=f"{price_data.cycle}", inline=True)  # 🔄
+            embed.add_field(name="\U0001F4CA Status", value="No price change detected", inline=True)  # 📊
 
         current_time = datetime.now(timezone.utc)
-        embed.add_field(name="⏰ Time", value=f"{current_time.strftime('%H:%M')} UTC", inline=True)
+        embed.add_field(name="\u23F0 Time", value=f"{current_time.strftime('%H:%M')} UTC", inline=True)  # ⏰
         success = await send_message_with_retry(self.bot, channel_id, embed=embed)
         if not success:
             self.logger.error("Failed to send oil message to channel %s", channel_id)
+
