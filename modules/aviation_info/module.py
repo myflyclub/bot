@@ -24,6 +24,7 @@ class AviationInfoModule:
     _queries_total: int = 0
     _queries_plane: int = 0
     _queries_airport: int = 0
+    _queries_research: int = 0
     _queries_success: int = 0
     _queries_not_found: int = 0
     _queries_failed: int = 0
@@ -65,6 +66,14 @@ class AviationInfoModule:
             async def airport_command(interaction: discord.Interaction, code: str):
                 await self._handle_airport_command(interaction, airport_id=None, code=code)
 
+        @tree.command(name="research", description="Research demand and relationship between two airport codes")
+        @app_commands.describe(
+            origin_code="Origin IATA/ICAO code (ex: EZE, SAEZ)",
+            dest_code="Destination IATA/ICAO code (ex: JFK, KJFK)",
+        )
+        async def research_command(interaction: discord.Interaction, origin_code: str, dest_code: str):
+            await self._handle_research_command(interaction, origin_code, dest_code)
+
         self._commands_registered = True
 
     @staticmethod
@@ -82,6 +91,25 @@ class AviationInfoModule:
             return ""
         base = 127397
         return chr(base + ord(code[0])) + chr(base + ord(code[1]))
+
+    @staticmethod
+    def _format_int(value: Any) -> str:
+        if isinstance(value, (int, float)):
+            return f"{int(value):,}"
+        return str(value)
+
+    @staticmethod
+    def _relationship_text(mutual_relationship: Any) -> str:
+        if not isinstance(mutual_relationship, (int, float)):
+            return "Unknown"
+        score = int(mutual_relationship)
+        if score >= 2:
+            return f"{score} (Excellent)"
+        if score >= 1:
+            return f"{score} (Good)"
+        if score <= -1:
+            return f"{score} (Poor)"
+        return f"{score} (Neutral)"
 
     async def _handle_plane_command(self, interaction: discord.Interaction, model: str) -> None:
         self._queries_total += 1
@@ -217,6 +245,102 @@ class AviationInfoModule:
             else:
                 await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
+    async def _handle_research_command(
+        self,
+        interaction: discord.Interaction,
+        origin_code: str,
+        dest_code: str,
+    ) -> None:
+        self._queries_total += 1
+        self._queries_research += 1
+        try:
+            origin_q = (origin_code or "").strip().upper()
+            dest_q = (dest_code or "").strip().upper()
+            if len(origin_q) not in (3, 4) or len(dest_q) not in (3, 4):
+                self._queries_not_found += 1
+                await interaction.response.send_message(
+                    "Use valid IATA/ICAO codes for `origin_code` and `dest_code`.",
+                    ephemeral=True,
+                )
+                return
+            if origin_q == dest_q:
+                self._queries_not_found += 1
+                await interaction.response.send_message(
+                    "`origin_code` and `dest_code` must be different.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(thinking=True, ephemeral=True)
+            payload = self.service.get_research_by_codes(origin_q, dest_q)
+            if not payload:
+                self._queries_not_found += 1
+                await interaction.followup.send(
+                    f"Research data not found for `{origin_q} -> {dest_q}`.",
+                    ephemeral=True,
+                )
+                return
+
+            from_code = payload.get("fromAirportCountryCode", "")
+            to_code = payload.get("toAirportCountryCode", "")
+            from_flag = self._country_flag(from_code)
+            to_flag = self._country_flag(to_code)
+            from_iata = payload.get("fromAirportIata", origin_q)
+            to_iata = payload.get("toAirportIata", dest_q)
+            route_text = f"{from_iata} {from_flag} -> {to_iata} {to_flag}".strip()
+
+            direct = payload.get("directDemand", {}) if isinstance(payload.get("directDemand"), dict) else {}
+            embed = discord.Embed(
+                title="Route Research",
+                description=route_text,
+                color=discord.Color.teal(),
+            )
+            embed.add_field(name="🌐 Flight Type", value=str(payload.get("flightType", "-")), inline=True)
+            distance = payload.get("distance")
+            distance_text = f"{self._format_int(distance)} km" if isinstance(distance, (int, float)) else str(distance)
+            embed.add_field(name="📏 Distance", value=distance_text, inline=True)
+            embed.add_field(
+                name="🤝 Relationship",
+                value=self._relationship_text(payload.get("mutualRelationship")),
+                inline=True,
+            )
+            embed.add_field(name="🧲 Affinity", value=str(payload.get("affinity", "-")), inline=False)
+
+            discount_economy = direct.get("discountEconomy", 0)
+            economy = direct.get("economy", 0)
+            business = direct.get("business", 0)
+            first = direct.get("first", 0)
+            economy_total = (discount_economy if isinstance(discount_economy, (int, float)) else 0) + (
+                economy if isinstance(economy, (int, float)) else 0
+            )
+            direct_line = (
+                f"{self._format_int(economy_total)} / "
+                f"{self._format_int(business)} / "
+                f"{self._format_int(first)}"
+            )
+            embed.add_field(name="👥 Direct Demand", value=direct_line, inline=False)
+
+            from_population = self._format_int(payload.get("fromAirportPopulation", 0))
+            to_population = self._format_int(payload.get("toAirportPopulation", 0))
+            from_income = self._format_int(payload.get("fromAirportIncome", 0))
+            to_income = self._format_int(payload.get("toAirportIncome", 0))
+            from_label = str(payload.get("fromAirportText", from_iata)).split("(")[0].strip() or from_iata
+            to_label = str(payload.get("toAirportText", to_iata)).split("(")[0].strip() or to_iata
+            population_col = f"{from_label}: {from_population}\n{to_label}: {to_population}"
+            income_col = f"{from_label}: ${from_income}\n{to_label}: ${to_income}"
+            embed.add_field(name="🏙️ Population", value=population_col, inline=True)
+            embed.add_field(name="💰 Income per Capita", value=income_col, inline=True)
+
+            self._queries_success += 1
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            self._queries_failed += 1
+            self.logger.error("research command failed: %s", e, exc_info=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+
     async def start(self) -> None:
         return None
 
@@ -240,6 +364,7 @@ class AviationInfoModule:
                 "queries_total": self._queries_total,
                 "queries_plane": self._queries_plane,
                 "queries_airport": self._queries_airport,
+                "queries_research": self._queries_research,
                 "queries_success": self._queries_success,
                 "queries_not_found": self._queries_not_found,
                 "queries_failed": self._queries_failed,

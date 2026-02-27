@@ -96,6 +96,28 @@ class AviationInfoService:
                 return airport
         return None
 
+    def get_research_link(self, origin_id: int, dest_id: int) -> Optional[Dict[str, Any]]:
+        payload = self.client.research_link(origin_id, dest_id)
+        if isinstance(payload, dict) and payload:
+            return payload
+        return None
+
+    def get_research_by_codes(self, origin_code: str, dest_code: str) -> Optional[Dict[str, Any]]:
+        origin = self.find_airport_by_code(origin_code)
+        dest = self.find_airport_by_code(dest_code)
+        if not origin or not dest:
+            return None
+        origin_id = _pick(origin, ["id"])
+        dest_id = _pick(dest, ["id"])
+        if not isinstance(origin_id, int) or not isinstance(dest_id, int):
+            return None
+        payload = self.get_research_link(origin_id, dest_id)
+        if not payload:
+            return None
+        payload["_origin_airport"] = origin
+        payload["_dest_airport"] = dest
+        return payload
+
     def get_airplane_models(self) -> List[Dict[str, Any]]:
         cache_key = 0
         cached = self._from_cache(self._models_cache, cache_key)

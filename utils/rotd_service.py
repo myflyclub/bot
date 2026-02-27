@@ -1,4 +1,4 @@
-"""
+﻿"""
 Route of the Day (ROTD) service: selects a route, gathers data from MyFly endpoints,
 and produces a normalized payload for formatting.
 
@@ -140,18 +140,33 @@ class ROTDService:
 
         # Extract from research-link which uses fromAirport* and toAirport* prefixes
         a_name = research.get('fromAirportText', '').split('(')[0] if research.get('fromAirportText') else f"Airport {origin_id}"
-        a_code = research.get('fromAirportIata', '—')
+        a_code = research.get('fromAirportIata', '-')
         a_country = research.get('fromAirportCountryCode', '')
         
         b_name = research.get('toAirportText', '').split('(')[0] if research.get('toAirportText') else f"Airport {dest_id}"
-        b_code = research.get('toAirportIata', '—')
+        b_code = research.get('toAirportIata', '-')
         b_country = research.get('toAirportCountryCode', '')
 
         flag_a, flag_b = _pick_flags(a_country, b_country)
 
         # Distance/runway/population/income from research
         distance_km = research.get('distance', 0)
-        runway_restriction = "—"  # Not in research payload
+        runway_restriction = "N/A"
+        try:
+            origin_airport = self.client.get_airport(origin_id) or {}
+            dest_airport = self.client.get_airport(dest_id) or {}
+            origin_runway = origin_airport.get("runwayLength")
+            dest_runway = dest_airport.get("runwayLength")
+            if isinstance(origin_runway, (int, float)) and isinstance(dest_runway, (int, float)):
+                shortest = int(min(origin_runway, dest_runway))
+                runway_restriction = f"{shortest:,} m"
+            elif isinstance(origin_runway, (int, float)):
+                runway_restriction = f"{int(origin_runway):,} m"
+            elif isinstance(dest_runway, (int, float)):
+                runway_restriction = f"{int(dest_runway):,} m"
+        except Exception:
+            # Keep payload resilient if runway lookup fails.
+            runway_restriction = "N/A"
         pop_a = research.get('fromAirportPopulation', 0)
         pop_b = research.get('toAirportPopulation', 0)
         income_ppp_a = research.get('fromAirportIncome', 0)
@@ -168,7 +183,7 @@ class ROTDService:
         else:
             relation_text = f"{mutual_rel} (Neutral)"
         
-        affinities_text = research.get('affinity', '—')
+        affinities_text = research.get('affinity', '-')
         
         flight_type = research.get('flightType', 'Domestic')
         
@@ -178,10 +193,10 @@ class ROTDService:
             econ = dd.get('economy', 0)
             biz = dd.get('business', 0)
             fst = dd.get('first')
-            fst_str = f"{fst}" if fst is not None else "–"
+            fst_str = f"{fst}" if fst is not None else "-"
             direct_demand = f"{econ} / {biz} / {fst_str}"
         else:
-            direct_demand = "—"
+            direct_demand = "-"
         # Detect direct presence - check if any route has BEST_DEAL and no connections
         has_direct = False
         if isinstance(route, list):
@@ -203,11 +218,11 @@ class ROTDService:
             
             segs = []
             for s in raw_segments:
-                from_code = s.get('fromAirportIata', '—')
-                to_code = s.get('toAirportIata', '—')
-                carrier = s.get('airlineName', '—')
-                flight_code = s.get('flightCode', '—')
-                aircraft = s.get('airplaneModelName', '—')
+                from_code = s.get('fromAirportIata', '-')
+                to_code = s.get('toAirportIata', '-')
+                carrier = s.get('airlineName', '-')
+                flight_code = s.get('flightCode', '-')
+                aircraft = s.get('airplaneModelName', '-')
                 duration_mins = s.get('duration', 0)
                 # Convert minutes to hours and minutes
                 if duration_mins:
@@ -218,10 +233,10 @@ class ROTDService:
                     else:
                         duration = f"{mins} minutes"
                 else:
-                    duration = '—'
-                price = s.get('price', '—')
-                cabin = s.get('linkClass', '—').title()
-                quality = s.get('computedQuality', '—')
+                    duration = '-'
+                price = s.get('price', '-')
+                cabin = s.get('linkClass', '-').title()
+                quality = s.get('computedQuality', '-')
                 features = s.get('features', [])
                 # Map features to friendly names
                 amenity_map = {
@@ -254,7 +269,7 @@ class ROTDService:
                 try:
                     total_price = sum(int(s.get('price', 0)) if isinstance(s.get('price'), (int, float)) else 0 for s in raw_segments)
                     cabin = segs[0]['cabin'] if segs else 'Economy'
-                    summary = f"{path} — ${total_price} ({cabin})"
+                    summary = f"{path} - ${total_price} ({cabin})"
                 except:
                     summary = path
             else:
@@ -309,3 +324,4 @@ class ROTDService:
             'best_seller': best_seller,
         }
         return payload
+
