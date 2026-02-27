@@ -31,11 +31,21 @@ class Config:
     
     # Bot Configuration
     BOT_STATUS = os.getenv('BOT_STATUS', 'Monitoring Oil Prices')
+    CLEAR_GUILD_COMMANDS_ON_STARTUP = os.getenv('CLEAR_GUILD_COMMANDS_ON_STARTUP', 'false').lower() == 'true'
     
     # ROTD Feature Configuration
     ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
     ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
     ROTD_MAX_RETRY_ATTEMPTS = int(os.getenv('ROTD_MAX_RETRY_ATTEMPTS', '100'))
+    _rotd_min_distance_raw = os.getenv('ROTD_MIN_DISTANCE_KM', '5500')
+    try:
+        ROTD_MIN_DISTANCE_KM = int((_rotd_min_distance_raw or '5500').split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid ROTD_MIN_DISTANCE_KM '{_rotd_min_distance_raw}', using default 5500")
+        ROTD_MIN_DISTANCE_KM = 5500
+    if ROTD_MIN_DISTANCE_KM < 0:
+        print(f"Warning: ROTD_MIN_DISTANCE_KM '{ROTD_MIN_DISTANCE_KM}' must be >= 0, using default 5500")
+        ROTD_MIN_DISTANCE_KM = 5500
     # Optional explicit test pair for ROTD
     ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
     ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')

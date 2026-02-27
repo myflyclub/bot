@@ -26,7 +26,7 @@ def _format_charms(charms_a: List[Dict[str, Any]], charms_b: List[Dict[str, Any]
 
     return "\n".join(
         [
-            "🧲 Charms",
+            "**🧲 Charms**",
             f"{code_a}: {tidy(charms_a)}",
             f"{code_b}: {tidy(charms_b)}",
         ]
@@ -53,23 +53,23 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
     )
 
     lines: List[str] = [
-        f"🎯 Random Route of the Day - {payload.get('date_str', '-')}",
+        f"**🎯 Random Route of the Day - {payload.get('date_str', '-')}**",
         "",
         f"{a_name} ({a_code}) -> {b_name} ({b_code})",
         route_line,
         "",
-        f"🌐 Flight Type: {payload.get('flight_type', '-')}",
-        f"📏 Distance: {format_int(payload.get('distance_km', 0))} km",
-        f"🛬 Runway Restriction: {payload.get('runway_restriction', '-')}",
-        f"🤝 Relationship: {payload.get('relation_text', '-')}",
-        f"🧲 Affinity: {payload.get('affinities_text', '-')}",
-        f"👥 Direct Demand: {payload.get('direct_demand', '-')}",
+        f"**🌐 Flight Type:** {payload.get('flight_type', '-')}",
+        f"**📏 Distance:** {format_int(payload.get('distance_km', 0))} km",
+        f"**🛬 Runway Restriction:** {payload.get('runway_restriction', '-')}",
+        f"**🤝 Relationship:** {payload.get('relation_text', '-')}",
+        f"**🧲 Affinity:** {payload.get('affinities_text', '-')}",
+        f"**👥 Direct Demand:** {payload.get('direct_demand', '-')}",
         "",
-        f"🏙️ Population\n{pop_col}",
+        f"**🏙️ Population**\n{pop_col}",
         "",
-        f"💰 Income per Capita\n{income_col}",
+        f"**💰 Income per Capita**\n{income_col}",
         "",
-        ("✅ Existing direct links available" if payload.get("has_direct") else "❌ No existing direct links"),
+        ("**✅ Existing direct links available**" if payload.get("has_direct") else "**❌ No existing direct links**"),
         "",
     ]
 
@@ -83,7 +83,7 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
         lines.append(charms_block)
         lines.append("")
 
-    lines.append("🎫 Tickets")
+    lines.append("**🎫 Tickets**")
     lines.append("")
 
     def add_itinerary(section_title: str, data: Optional[Dict[str, Any]]) -> None:
@@ -93,8 +93,11 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
         summary = data.get("summary", "")
         if summary:
             lines.append(summary)
+        segments = data.get("segments", []) or []
+        if segments:
+            lines.append("────────────")
 
-        for seg in data.get("segments", []):
+        for seg in segments:
             seg_from = seg.get("from", "-")
             seg_to = seg.get("to", "-")
 
@@ -114,13 +117,13 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
                 # Local hops usually have no flight number/aircraft; show a cleaner transfer line.
                 lines.append(f"🚌🚇 Local transfer | {duration}")
             else:
-                lines.append(f"✈️ {carrier} - {code}")
+                lines.append(f"✈️ **{carrier}** - {code}")
                 lines.append(
                     f"{aircraft} | ⏱️ {duration} | 💵 {price} ({cabin}) | ⭐ {quality} | 🖥️ {amenities_text}"
                 )
         lines.append("")
 
-    add_itinerary("🏷️ Best Deal", payload.get("best_deal"))
-    add_itinerary("🔥 Best Seller", payload.get("best_seller"))
+    add_itinerary("**🏷️ Best Deal**", payload.get("best_deal"))
+    add_itinerary("**🔥 Best Seller**", payload.get("best_seller"))
 
     return "\n".join(lines).strip()

@@ -76,6 +76,7 @@ class ROTDService:
         - Retry until a valid pair is found (or abort if API health fails)
         """
         min_size = Config.ROTD_MIN_AIRPORT_SIZE
+        min_distance_km = Config.ROTD_MIN_DISTANCE_KM
         configured_max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
         safety_floor_attempts = 5000
         effective_max_attempts = max(configured_max_attempts, safety_floor_attempts)
@@ -88,6 +89,7 @@ class ROTDService:
             f"(ID range: 1-{max_id}, phase1={min_size}/{min_size} <=50, "
             f"phase2={min_size}/{max(2, min_size - 1)} <=100, "
             f"phase3={max(2, min_size - 1)}/{max(2, min_size - 1)} >100, "
+            f"min_distance_km={min_distance_km}, "
             f"configured_max_attempts={configured_max_attempts}, effective_max_attempts={effective_max_attempts})"
         )
 
@@ -166,9 +168,40 @@ class ROTDService:
                 # Validate routes exist
                 route = self.client.search_route(origin_id, dest_id)
                 if route and isinstance(route, list) and len(route) > 0:
+                    research = self.client.research_link(origin_id, dest_id)
+                    distance_raw = research.get("distance") if isinstance(research, dict) else None
+                    try:
+                        distance_km = float(distance_raw)
+                    except (TypeError, ValueError):
+                        logger.debug(
+                            "ROTD attempt %s: Missing/invalid distance for %s->%s (%r)",
+                            attempt_no,
+                            origin_id,
+                            dest_id,
+                            distance_raw,
+                        )
+                        continue
+                    if distance_km < float(min_distance_km):
+                        logger.debug(
+                            "ROTD attempt %s: Distance %.0f km below minimum %s km for %s->%s",
+                            attempt_no,
+                            distance_km,
+                            min_distance_km,
+                            origin_id,
+                            dest_id,
+                        )
+                        continue
                     origin_iata = origin_airport.get('iata', '?')
                     dest_iata = dest_airport.get('iata', '?')
-                    logger.info(f"ROTD: Found valid pair after {attempt_no} attempts: {origin_id} ({origin_iata}) -> {dest_id} ({dest_iata})")
+                    logger.info(
+                        "ROTD: Found valid pair after %s attempts: %s (%s) -> %s (%s), distance=%.0f km",
+                        attempt_no,
+                        origin_id,
+                        origin_iata,
+                        dest_id,
+                        dest_iata,
+                        distance_km,
+                    )
                     return (origin_id, dest_id)
                 else:
                     logger.debug(f"ROTD attempt {attempt_no}: No routes for {origin_id}->{dest_id}")
