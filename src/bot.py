@@ -1,26 +1,20 @@
 import os
 import sys
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 import logging
 import asyncio
-import time
-from datetime import datetime, timezone
-from typing import Optional
 
 # Add the parent directory to Python path to import config and utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.config import Config
-from utils.price_monitor import create_monitor
-from utils.crash_handler import create_crash_handler, with_crash_recovery
+from app.bootstrap import build_application
+from app.runtime import BotRuntime
+from utils.crash_handler import create_crash_handler
 from utils.bot_supervisor import create_supervised_bot
-from utils.discord_client_wrapper import send_message_with_retry, edit_channel_name_with_retry
-from utils.health_status import HealthStatusAggregator
-from utils.rotd_service import ROTDService
-from utils.rotd_formatter import format_rotd_text
 
 # Load environment variables
 load_dotenv()
@@ -42,12 +36,6 @@ intents.members = False
 intents.presences = False
 
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
-health_aggregator = HealthStatusAggregator()
-rotd_service = ROTDService()
-
-# Price monitoring
-price_monitor = None
-monitoring_task = None
 
 # Initialize global crash handler
 crash_handler = create_crash_handler(
@@ -56,19 +44,23 @@ crash_handler = create_crash_handler(
     emergency_channel_id=Config.get_emergency_channel_id(),
     emergency_token=Config.DISCORD_TOKEN
 )
+app_instance = build_application(
+    config=Config,
+    bot=bot,
+    crash_handler=crash_handler,
+    logger_factory=logging.getLogger,
+)
+runtime = BotRuntime(
+    bot=bot,
+    config=Config,
+    app_instance=app_instance,
+    logger=logger,
+)
 
 async def _graceful_shutdown():
     """Gracefully stop background tasks and close the Discord client."""
-    global monitoring_task, price_monitor
     try:
-        if price_monitor:
-            price_monitor.stop_monitoring()
-        if monitoring_task and not monitoring_task.done():
-            monitoring_task.cancel()
-            try:
-                await monitoring_task
-            except Exception:
-                pass
+        await app_instance.stop_modules()
     finally:
         try:
             await bot.close()
@@ -80,46 +72,8 @@ crash_handler.set_shutdown_callback(_graceful_shutdown)
 
 @bot.event
 async def on_ready():
-    """Event triggered when bot successfully connects to Discord"""
-    logger.info(f'Bot connected successfully as {bot.user.name}#{bot.user.discriminator}')
-    logger.info(f'Bot ID: {bot.user.id}')
-    logger.info(f'Connected to {len(bot.guilds)} guild(s)')
-
-    # Sync slash commands once after startup
-    if not getattr(bot, "_slash_synced", False):
-        try:
-            synced = await bot.tree.sync()
-            bot._slash_synced = True
-            logger.info(f"Synced {len(synced)} global slash command(s)")
-        except Exception as e:
-            logger.error(f"Failed to sync slash commands: {e}")
-    
-    # Set bot status
-    await bot.change_presence(activity=discord.Game(name=Config.BOT_STATUS))
-    
-    # Initialize price monitor
-    global price_monitor
-    price_monitor = create_monitor(base_url=Config.OIL_PRICE_URL, polling_interval=Config.POLLING_INTERVAL)
-    
-    # Log guild information
-    for guild in bot.guilds:
-        logger.info(f'Connected to guild: {guild.name} (ID: {guild.id})')
-        
-        # Check if oil price channel exists in this guild
-        if Config.DISCORD_OIL_CHANNEL:
-            channel = guild.get_channel(Config.get_oil_channel_id())
-            if channel:
-                logger.info(f'Oil price channel found: {channel.name} (ID: {channel.id})')
-                logger.info(f'Channel permissions: {channel.permissions_for(guild.me)}')
-            else:
-                logger.warning(f'Oil price channel {Config.DISCORD_OIL_CHANNEL} not found in guild {guild.name}')
-    
-    # Start passive monitoring immediately
-    await start_passive_monitoring()
-
-    # Start ROTD loop if enabled and channel configured
-    if Config.ROTD_ENABLED and Config.DISCORD_RROTD_CHANNEL:
-        await start_rotd_loop()
+    """Discord on_ready event delegated to runtime."""
+    await runtime.on_ready()
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -134,488 +88,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         logger.exception("Failed to send slash command error response")
 
-@bot.tree.command(name='check', description='Manually check for oil price updates')
-async def check_price_updates(interaction: discord.Interaction):
-    """Manually check for price updates"""
-    if not price_monitor:
-        await interaction.response.send_message("Error: Price monitor not initialized.", ephemeral=True)
-        return
 
-    try:
-        await interaction.response.defer(thinking=True, ephemeral=True)
-
-        # Check for updates
-        change_event = price_monitor.check_for_updates()
-
-        if change_event:
-            # Use unified message format for consistency
-            await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
-
-            # Auto-rename channel if configured
-            if Config.DISCORD_OIL_CHANNEL:
-                await auto_rename_channel(change_event)
-        else:
-            # Send current price info using unified format
-            current_price = price_monitor.get_current_price()
-            if current_price:
-                await send_unified_oil_price_message(current_price, is_update=False)
-
-        await interaction.followup.send("Oil check completed.", ephemeral=True)
-
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"Error: Failed to check for updates: {str(e)}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Error: Failed to check for updates: {str(e)}", ephemeral=True)
-        logger.error(f"Error checking for updates: {e}")
-
-
-async def auto_rename_channel(change_event):
-    """Automatically rename the configured channel with the new oil price and direction indicator"""
-    if not Config.DISCORD_OIL_CHANNEL:
-        return
-    
-    try:
-        channel_id = Config.get_oil_channel_id()
-        target_channel = bot.get_channel(channel_id)
-        
-        if not target_channel:
-            logger.error(f"Could not find channel with ID {channel_id} for auto-rename")
-            return
-        
-        # Determine direction emoji based on price change
-        if change_event.event_type == 'initial':
-            # Initial price - no direction indicator
-            direction_emoji = ""
-        elif change_event.price_change > 0:
-            # Price went up
-            direction_emoji = "📈"
-        elif change_event.price_change < 0:
-            # Price went down
-            direction_emoji = "📉"
-        else:
-            # No change
-            direction_emoji = ""
-        
-        # Create new channel name with 💲 emoji, direction indicator, and dash separator
-        price_str = f"{change_event.new_price:.2f}"
-        if '.' in price_str:
-            dollars, cents = price_str.split('.')
-            new_channel_name = f"oil-price {direction_emoji}💲{dollars}-{cents}"
-        else:
-            new_channel_name = f"oil-price {direction_emoji}💲{price_str}"
-        
-        # Ensure channel name is within Discord's limits (100 characters)
-        if len(new_channel_name) > 100:
-            if '.' in price_str:
-                dollars, cents = price_str.split('.')
-                new_channel_name = f"oil {direction_emoji}💲{dollars}-{cents}"
-            else:
-                new_channel_name = f"oil {direction_emoji}💲{price_str}"
-        
-        # Rename the channel with retry/rate-limit handling
-        success = await edit_channel_name_with_retry(bot, channel_id, new_channel_name)
-        if success:
-            logger.info(f"Auto-renamed channel to: {new_channel_name}")
-        else:
-            logger.error(f"Failed to auto-rename channel {channel_id} after retries")
-        
-    except discord.Forbidden:
-        logger.error(f"Bot lacks permission to rename channel {channel_id}")
-    except discord.HTTPException as e:
-        logger.error(f"Discord API error while auto-renaming channel: {e}")
-    except Exception as e:
-        logger.error(f"Unexpected error while auto-renaming channel: {e}")
-
-async def start_passive_monitoring():
-    """Start passive monitoring immediately on bot startup"""
-    if not price_monitor:
-        logger.error("Price monitor not initialized")
-        return
-    
-    try:
-        # Start monitoring
-        price_monitor.start_monitoring()
-        start_monitoring_task()
-        
-        # Immediately fetch and send current price
-        await fetch_and_send_current_price()
-        
-        logger.info("Passive monitoring started successfully")
-        
-    except Exception as e:
-        logger.error(f"Failed to start passive monitoring: {e}")
-
-async def fetch_and_send_current_price():
-    """Fetch current price and send update to Discord channel"""
-    if not Config.DISCORD_OIL_CHANNEL:
-        return
-    
-    try:
-        # Force a price check to get the latest data
-        change_event = price_monitor.check_for_updates()
-        
-        if change_event:
-            # Send price update notification
-            await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
-            
-            # Auto-rename channel if configured
-            await auto_rename_channel(change_event)
-            
-            logger.info(f"Initial price update sent: ${change_event.new_price:.2f}")
-        else:
-            # If no change event, still send current price info
-            current_price = price_monitor.get_current_price()
-            if current_price:
-                await send_unified_oil_price_message(current_price, is_update=False)
-                logger.info(f"Current price info sent: ${current_price.price:.2f}")
-        
-    except Exception as e:
-        logger.error(f"Error fetching and sending current price: {e}")
-
-async def start_rotd_loop():
-    """Schedule a daily ROTD post to the configured channel."""
-    try:
-        # Schedule daily loop using discord.ext.tasks
-        @tasks.loop(hours=24)
-        async def daily_rotd():
-            try:
-                await post_rotd_once()
-            except Exception as e:
-                logger.error(f"ROTD daily task error: {e}")
-
-        # start after a small delay to ensure bot is fully ready
-        await asyncio.sleep(5)
-        daily_rotd.start()
-        logger.info("ROTD daily task scheduled (every 24h)")
-    except Exception as e:
-        logger.error(f"Failed to start ROTD loop: {e}")
-
-async def post_rotd_once():
-    """Generate and post one ROTD report to the configured channel."""
-    channel_id = Config.get_rrotd_channel_id()
-    if not channel_id:
-        logger.warning("ROTD channel not configured")
-        return
-    
-    logger.info("ROTD: Generating payload")
-    pair = Config.get_rotd_pair()
-    payload = None
-    
-    if pair:
-        # Use configured pair
-        origin_id, dest_id = pair
-        logger.info(f"ROTD: Using configured pair {origin_id} -> {dest_id}")
-    else:
-        # Select random pair
-        logger.info("ROTD: No configured pair, selecting random airports")
-        try:
-            pair = await asyncio.wait_for(
-                asyncio.to_thread(rotd_service._select_candidate_pair),
-                timeout=45,
-            )
-        except asyncio.TimeoutError:
-            logger.error("ROTD: Random selection timed out")
-            return
-        
-        if not pair:
-            logger.warning("ROTD: Could not find valid random pair; skipping")
-            return
-        
-        origin_id, dest_id = pair
-    
-    # Generate payload
-    try:
-        payload = await asyncio.wait_for(
-            asyncio.to_thread(rotd_service.generate_payload, origin_id, dest_id),
-            timeout=25,
-        )
-    except asyncio.TimeoutError:
-        logger.error("ROTD: generate_payload timed out")
-        return
-    
-    if not payload:
-        logger.info("ROTD: No payload generated; skipping post")
-        return
-    
-    text = format_rotd_text(payload)
-    # Discord limits messages to 2000 chars; chunk if needed
-    async def _send_chunked(cid: int, content: str, limit: int = 1900):
-        lines = content.split('\n')
-        chunk = ''
-        for line in lines:
-            if len(chunk) + len(line) + 1 > limit:
-                await send_message_with_retry(bot, cid, content=chunk)
-                chunk = ''
-            chunk += (('\n' if chunk else '') + line)
-        if chunk:
-            await send_message_with_retry(bot, cid, content=chunk)
-    await _send_chunked(channel_id, text)
-
-@bot.tree.command(name='randomroute', description='Generate and post a Route of the Day once')
-@app_commands.describe(origin_id='Optional origin airport ID', dest_id='Optional destination airport ID')
-async def randomroute_command(interaction: discord.Interaction, origin_id: Optional[int] = None, dest_id: Optional[int] = None):
-    try:
-        channel_id = Config.get_rrotd_channel_id()
-        if not channel_id:
-            await interaction.response.send_message("Error: ROTD channel not configured. Set DISCORD_RROTD_CHANNEL in .env.", ephemeral=True)
-            return
-
-        await interaction.response.defer(thinking=True, ephemeral=True)
-
-        # Resolve pair: prefer command args, then env pair, finally random selection
-        if origin_id is not None and dest_id is not None:
-            pair = (origin_id, dest_id)
-        elif origin_id is None and dest_id is None:
-            # No args provided - select random pair
-            await interaction.followup.send("Selecting random airport pair...", ephemeral=True)
-            try:
-                pair = await asyncio.wait_for(
-                    asyncio.to_thread(rotd_service._select_candidate_pair),
-                    timeout=30,
-                )
-            except asyncio.TimeoutError:
-                await interaction.followup.send("Random selection timed out. Please try again.", ephemeral=True)
-                return
-            if not pair:
-                await interaction.followup.send("Could not find a valid random airport pair. Try providing specific IDs.", ephemeral=True)
-                return
-        else:
-            # Only one ID provided - try env pair as fallback
-            pair = Config.get_rotd_pair()
-            if not pair:
-                await interaction.followup.send(
-                    "Provide both origin and destination IDs, or neither for random selection.\n"
-                    "Usage: `/randomroute origin_id:3803 dest_id:3358` or `/randomroute`",
-                    ephemeral=True,
-                )
-                return
-
-        origin_id, dest_id = pair
-        # Offload blocking HTTP work to a thread and enforce a timeout
-        try:
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(rotd_service.generate_payload, origin_id, dest_id),
-                timeout=25,
-            )
-        except asyncio.TimeoutError:
-            await interaction.followup.send("ROTD generation timed out. Please try again later.", ephemeral=True)
-            return
-        if not payload:
-            await interaction.followup.send("Could not generate route at this time.", ephemeral=True)
-            return
-        text = format_rotd_text(payload)
-
-        # Build friendly airport names for acknowledgement
-        origin_name = f"{payload.get('a_name', 'Airport')} ({payload.get('a_code', '?')})"
-        dest_name = f"{payload.get('b_name', 'Airport')} ({payload.get('b_code', '?')})"
-
-        # Post to configured target channel; acknowledge in invoking channel
-        await interaction.followup.send(f"Posting route {origin_name} -> {dest_name} to <#{channel_id}> ...", ephemeral=True)
-        # Chunk and send
-        lines = text.split('\n')
-        chunk = ''
-        for line in lines:
-            if len(chunk) + len(line) + 1 > 1900:
-                await send_message_with_retry(bot, channel_id, content=chunk)
-                chunk = ''
-            chunk += (('\n' if chunk else '') + line)
-        if chunk:
-            await send_message_with_retry(bot, channel_id, content=chunk)
-    except Exception as e:
-        logger.error(f"randomroute command failed: {e}", exc_info=True)
-        if interaction.response.is_done():
-            await interaction.followup.send(f"Error: {e}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
-
-
-async def send_unified_oil_price_message(price_data, change_event=None, is_update=False):
-    """Unified function to send oil price information in consistent format"""
-    if not Config.DISCORD_OIL_CHANNEL:
-        return
-    
-    try:
-        channel_id = Config.get_oil_channel_id()
-        target_channel = bot.get_channel(channel_id)
-        
-        if not target_channel:
-            logger.error(f"Could not find channel with ID {channel_id}")
-            return
-        
-        # Create unified embed with consistent "🔄 Oil Price Updated!" format
-        embed = discord.Embed(
-            title="🔄 Oil Price Updated!",
-            description="Automatic price update detected" if is_update else "Current price information",
-            color=discord.Color.green()
-        )
-        
-        if change_event and change_event.event_type != 'initial':
-            # Update scenario: show old price, new price, cycle, and change
-            embed.add_field(name="💰 Old Price", value=f"${change_event.old_price:.2f}", inline=True)
-            embed.add_field(name="💰 New Price", value=f"${change_event.new_price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{change_event.new_cycle}", inline=True)
-            embed.add_field(name="📊 Change", value=f"${change_event.price_change:+.2f} ({change_event.price_change_percent:+.2f}%)", inline=True)
-        elif change_event and change_event.event_type == 'initial':
-            # Initial price scenario
-            embed.add_field(name="💰 New Price", value=f"${change_event.new_price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{change_event.new_cycle}", inline=True)
-            embed.add_field(name="📝 Type", value="Initial Price", inline=True)
-        else:
-            # Info scenario: show current price and cycle only
-            embed.add_field(name="💰 Current Price", value=f"${price_data.price:.2f}", inline=True)
-            embed.add_field(name="🔄 Cycle", value=f"{price_data.cycle}", inline=True)
-            embed.add_field(name="📊 Status", value="No price change detected", inline=True)
-        
-        # Add UTC timestamp to all message scenarios
-        current_time = datetime.now(timezone.utc)
-        time_str = current_time.strftime("%H:%M")
-        embed.add_field(name="⏰ Time", value=f"{time_str} UTC", inline=True)
-        
-        success = await send_message_with_retry(bot, channel_id, embed=embed)
-        if success:
-            logger.info(f"Unified oil price message sent to channel {channel_id}")
-        else:
-            logger.error(f"Failed to send unified oil price message to channel {channel_id} after retries")
-    except Exception as e:
-        logger.error(f"Error sending unified oil price message: {e}")
-
-
-@bot.tree.command(name='health', description='Show bot health and breaker status')
-async def health_command(interaction: discord.Interaction):
-    try:
-        snap = health_aggregator.snapshot(price_monitor, bot)
-        embed = discord.Embed(
-            title="Bot Health",
-            description="Runtime and dependency health",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Uptime", value=f"{snap.uptime:.1f}s", inline=True)
-        embed.add_field(name="Monitoring", value=str(snap.monitoring_active), inline=True)
-        embed.add_field(name="Guilds", value=str(snap.guild_count), inline=True)
-        if snap.websocket_latency is not None:
-            embed.add_field(name="WS Latency", value=f"{snap.websocket_latency*1000:.0f} ms", inline=True)
-        embed.add_field(name="Price", value=(f"${snap.current_price:.2f}" if snap.current_price is not None else "-"), inline=True)
-        embed.add_field(name="Cycle", value=(str(snap.current_cycle) if snap.current_cycle is not None else "-"), inline=True)
-        embed.add_field(name="Last HTTP", value=(f"<t:{int(snap.last_http_response_time)}:R>" if snap.last_http_response_time else "-"), inline=True)
-        embed.add_field(name="Next Poll", value=(f"<t:{int(snap.next_poll_time)}:R>" if snap.next_poll_time else "-"), inline=True)
-        embed.add_field(name="Updates", value=str(snap.total_updates_processed), inline=True)
-        embed.add_field(name="Changes", value=str(snap.total_changes_detected), inline=True)
-        cb = snap.circuit_breaker
-        embed.add_field(name="Breaker", value=f"{cb.get('state')} (fail={cb.get('failures')})", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"Error: Failed to get health: {str(e)}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Error: Failed to get health: {str(e)}", ephemeral=True)
-        logger.error(f"Error generating health: {e}")
-
-
-@bot.tree.command(name='stats', description='Show session statistics')
-async def stats_command(interaction: discord.Interaction):
-    try:
-        if not price_monitor:
-            await interaction.response.send_message("Error: Price monitor not initialized.", ephemeral=True)
-            return
-        summary = price_monitor.get_price_change_summary()
-        embed = discord.Embed(
-            title="Session Statistics",
-            description="Monitoring session metrics",
-            color=discord.Color.purple()
-        )
-        sess = summary.get('session_stats', {})
-        embed.add_field(name="Session Duration", value=f"{sess.get('session_duration', 0):.1f}s", inline=True)
-        embed.add_field(name="Updates", value=str(sess.get('total_updates_processed', 0)), inline=True)
-        embed.add_field(name="Changes", value=str(sess.get('total_changes_detected', 0)), inline=True)
-        last = summary.get('last_change_event') or {}
-        embed.add_field(name="Last Event", value=str(last.get('event_type')), inline=True)
-        embed.add_field(name="Last Delta", value=(f"${last.get('price_change'):+.2f}" if last.get('price_change') is not None else "-"), inline=True)
-        embed.add_field(name="% Last Delta", value=(f"{last.get('price_change_percent'):+.2f}%" if last.get('price_change_percent') is not None else "-"), inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"Error: Failed to get stats: {str(e)}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Error: Failed to get stats: {str(e)}", ephemeral=True)
-        logger.error(f"Error generating stats: {e}")
-
-
-def start_monitoring_task():
-    """Start the background monitoring task"""
-    global monitoring_task
-    if monitoring_task and not monitoring_task.done():
-        return
-    
-    monitoring_task = asyncio.create_task(background_monitoring())
-
-def stop_monitoring_task():
-    """Stop the background monitoring task"""
-    global monitoring_task
-    if monitoring_task and not monitoring_task.done():
-        monitoring_task.cancel()
-
-@with_crash_recovery(crash_handler)
-async def background_monitoring():
-    """Background task for automatic price monitoring with crash recovery"""
-    if not price_monitor:
-        return
-    
-    logger.info("Background monitoring task started")
-    
-    try:
-        while price_monitor.monitoring_active:
-            try:
-                # Check for updates
-                change_event = price_monitor.check_for_updates()
-                
-                if change_event:
-                    logger.info(f"Price update detected in background: ${change_event.new_price:.2f}")
-                    
-                    # Auto-rename channel with error handling
-                    try:
-                        await auto_rename_channel(change_event)
-                    except Exception as e:
-                        logger.error(f"Error in channel rename: {e}")
-                        # Continue monitoring even if channel rename fails
-                    
-                    # Send notification to configured channel with error handling
-                    if Config.DISCORD_OIL_CHANNEL:
-                        try:
-                            await send_unified_oil_price_message(price_monitor.get_current_price(), change_event, is_update=True)
-                        except Exception as e:
-                            logger.error(f"Error sending price message: {e}")
-                            # Continue monitoring even if message sending fails
-                
-                # Wait for next check (use monitor's polling interval)
-                next_poll = price_monitor.http_client.get_next_poll_time()
-                wait_time = max(0, next_poll - time.time())
-                
-                if wait_time > 0:
-                    await asyncio.sleep(wait_time)
-                else:
-                    await asyncio.sleep(Config.POLLING_INTERVAL)  # Use config value instead of hardcoded
-                    
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in background monitoring: {e}")
-                # Report to crash handler for tracking but don't crash
-                await crash_handler.handle_crash(e, {
-                    'function': 'background_monitoring',
-                    'monitoring_active': price_monitor.monitoring_active if price_monitor else False,
-                    'current_price': price_monitor.get_current_price().price if price_monitor and price_monitor.get_current_price() else None
-                })
-                await asyncio.sleep(60)  # Wait 1 minute on error
-    
-    except asyncio.CancelledError:
-        logger.info("Background monitoring task cancelled")
-    except Exception as e:
-        logger.error(f"Background monitoring task failed: {e}")
-        # This will be caught by the crash recovery decorator
-        raise
-    finally:
-        logger.info("Background monitoring task stopped")
 
 async def main():
     """Main function to run the bot (without crash recovery)"""
@@ -666,51 +139,8 @@ async def main_supervised():
         print(f"Final run stats: {stats['successful_runs']} successful runs, "
               f"{stats['crash_handler_stats']['total_crashes']} crashes")
 
-# Add crash stats command for monitoring
-@bot.tree.command(name='crash_stats', description='Get crash handler statistics (admin)')
-@app_commands.default_permissions(administrator=True)
-async def crash_stats_command(interaction: discord.Interaction):
-    """Get crash handler statistics (hidden admin command)"""
-    try:
-        stats = crash_handler.get_crash_stats()
-
-        embed = discord.Embed(
-            title="Crash Handler Statistics",
-            description="Bot stability and recovery information",
-            color=discord.Color.blue()
-        )
-
-        embed.add_field(name="Restart Count", value=f"{stats['restart_count']}/{stats['max_restart_attempts']}", inline=True)
-        embed.add_field(name="Current Uptime", value=f"{stats['current_uptime']:.1f}s", inline=True)
-        embed.add_field(name="Total Crashes", value=str(stats['total_crashes']), inline=True)
-
-        if stats['last_crash_time']:
-            embed.add_field(name="Last Crash", value=f"<t:{int(stats['last_crash_time'])}:R>", inline=True)
-
-        embed.add_field(name="Start Time", value=f"<t:{int(stats['start_time'])}:F>", inline=False)
-
-        # Add recent crash history
-        if stats['crash_history']:
-            crash_list = []
-            for crash in stats['crash_history'][-5:]:
-                crash_list.append(f"`{crash['error_type']}` - <t:{int(crash['timestamp'])}:R>")
-
-            embed.add_field(name="Recent Crashes", value="\n".join(crash_list) or "None", inline=False)
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"Crash stats requested by {interaction.user}")
-
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"Error: Failed to get crash stats: {str(e)}", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Error: Failed to get crash stats: {str(e)}", ephemeral=True)
-        logger.error(f"Error getting crash stats: {e}")
-
 
 if __name__ == "__main__":
-    import asyncio
-    
     # Check if we should run with supervision (default) or without
     run_supervised = os.getenv('RUN_SUPERVISED', 'true').lower() == 'true'
     
