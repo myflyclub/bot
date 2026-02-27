@@ -4,6 +4,17 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+
+def _clean_env_string(value: str, default: str) -> str:
+    raw = value if value is not None else default
+    cleaned = raw.split('#')[0].strip()
+    return cleaned or default
+
+
+def _normalize_path(value: str, default: str) -> str:
+    path = _clean_env_string(value, default)
+    return path if path.startswith('/') else f"/{path}"
+
 class Config:
     """Configuration class for the Oil Price Alert Bot"""
     
@@ -15,6 +26,23 @@ class Config:
     
     # Oil Price Monitoring Configuration
     OIL_PRICE_URL = os.getenv('OIL_PRICE_URL', 'https://play.myfly.club/oil-prices')
+
+    # MyFly API base and endpoint templates
+    MFC_BASE_URL = _clean_env_string(os.getenv('MFC_BASE_URL'), 'https://play.myfly.club').rstrip('/')
+    MFC_SEARCH_ROUTE_PATH_TEMPLATE = _normalize_path(
+        os.getenv('MFC_SEARCH_ROUTE_PATH_TEMPLATE'),
+        '/search-route/{origin_id}/{dest_id}',
+    )
+    MFC_RESEARCH_LINK_PATH_TEMPLATE = _normalize_path(
+        os.getenv('MFC_RESEARCH_LINK_PATH_TEMPLATE'),
+        '/research-link/{origin_id}/{dest_id}',
+    )
+    MFC_AIRPORT_BY_ID_PATH_TEMPLATE = _normalize_path(
+        os.getenv('MFC_AIRPORT_BY_ID_PATH_TEMPLATE'),
+        '/airports/{airport_id}',
+    )
+    MFC_AIRPORTS_PATH = _normalize_path(os.getenv('MFC_AIRPORTS_PATH'), '/airports')
+    MFC_AIRPLANE_MODELS_PATH = _normalize_path(os.getenv('MFC_AIRPLANE_MODELS_PATH'), '/airplane-models')
     
     # Parse POLLING_INTERVAL, handling comments and whitespace
     _polling_raw = os.getenv('POLLING_INTERVAL', '300')

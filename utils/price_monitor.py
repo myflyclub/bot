@@ -10,6 +10,7 @@ import time
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
 
+from config.config import Config
 from .price_parser import OilPriceParser, OilPriceData
 from .http_client import OilPriceHTTPClient
 
@@ -32,11 +33,11 @@ class OilPriceMonitor:
     """Main monitoring system for oil prices (v2: in-memory only)"""
     
     def __init__(self, 
-                 base_url: str = "https://play.myfly.club/oil-prices",
+                 base_url: Optional[str] = None,
                  change_threshold: float = 0.01,  # 1 cent threshold
                  polling_interval: int = 300):  # Default 5 minutes
         self.parser = OilPriceParser()
-        self.http_client = OilPriceHTTPClient(base_url, polling_interval)
+        self.http_client = OilPriceHTTPClient(base_url or Config.OIL_PRICE_URL, polling_interval)
         self.change_threshold = change_threshold
         
         # Current state (in-memory only)
@@ -252,7 +253,7 @@ class OilPriceMonitor:
         logger.info("Oil price monitor closed")
 
 
-def create_monitor(base_url: str = "https://play.myfly.club/oil-prices",
+def create_monitor(base_url: Optional[str] = None,
                   polling_interval: int = 300) -> OilPriceMonitor:
     """Factory function to create a new monitor instance (v2: in-memory only)"""
     return OilPriceMonitor(base_url, polling_interval=polling_interval)
