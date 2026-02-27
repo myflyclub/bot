@@ -1,38 +1,42 @@
 # MfcOilAlert
 
-Modular Discord bot for MyFly Club with two core services:
+Modular Discord bot for MyFly Club with three feature areas:
 
 - Oil monitoring: polls oil prices, posts updates, and renames the oil channel.
-- Route of the Day (ROTD): generates and posts random route reports.
-- Aviation info: live lookups for airport and airplane model metadata.
+- Route of the Day (ROTD): generates and posts route reports manually or on schedule.
+- Aviation info: live lookups for airplane models, airports, and route research data.
 
-The bot uses slash commands (`/`) and a modular runtime (`oil`, `rotd`, `ops`) with crash recovery and retry logic.
+The bot is slash-command only (`/`) and runs with a module-based runtime (`oil`, `rotd`, `aviation_info`, `ops`) plus crash recovery, retries, and HTTP circuit breaker support.
 
 ## Features
 
 - Slash command interface only (no prefix commands).
 - Modular architecture:
   - `oil` module: monitoring, health, stats, channel rename.
-  - `rotd` module: random route command + daily posting loop.
-  - `aviation_info` module: live `/plane` and `/airport` lookups.
+  - `rotd` module: random route command + optional daily scheduler.
+  - `aviation_info` module: `/plane`, `/airport`, `/research`.
   - `ops` module: crash and system diagnostics.
-- Crash recovery and supervised mode.
-- Circuit breaker and retry handling for HTTP/Discord calls.
-- Aggregated module diagnostics.
+- Supervised mode (`RUN_SUPERVISED`) for crash recovery and auto-restart.
+- Retry helpers for Discord API operations.
+- HTTP circuit breaker for external API calls.
+- Aggregated module health/stats diagnostics.
 
-## Commands
+## Slash Commands
 
-The bot registers these slash commands:
+The bot currently registers:
 
 - `/check`: manual oil refresh.
 - `/health`: oil runtime health snapshot.
 - `/stats`: oil session counters.
 - `/randomroute`: generate and post ROTD now.
 - `/plane`: search airplane models by name.
-- `/airport`: get airport details by IATA/ICAO code.
+- `/airport`: airport lookup by IATA/ICAO (and by ID when enabled).
+- `/research`: research demand/relationship between two airport codes.
 - `/crash_stats`: crash handler stats (admin).
 - `/system_health`: aggregated health across modules (admin).
 - `/system_stats`: aggregated stats across modules (admin).
+
+Note: when `AVIATION_AIRPORT_ID_LOOKUP_ENABLED=true`, `/airport` supports `airport_id` and `code`. Otherwise it supports `code` only.
 
 ## Requirements
 
@@ -72,24 +76,23 @@ Then fill `.env` with your values.
 
 ## Environment Variables
 
-Current `env.example` keys:
+Current keys from `env.example`:
 
 ```env
-# Discord
+# Discord Bot Configuration
 DISCORD_TOKEN=
 DISCORD_OIL_CHANNEL=
 DISCORD_RROTD_CHANNEL=
 
-# Bot
-BOT_STATUS=Monitoring Oil Prices
-RUN_SUPERVISED=true
-CLEAR_GUILD_COMMANDS_ON_STARTUP=false
-
-# Oil
+# Oil Price Monitoring Configuration
 OIL_PRICE_URL=https://play.myfly.club/oil-prices
 POLLING_INTERVAL=180
 
-# ROTD
+# Bot Configuration
+BOT_STATUS=Testing Aviation Info
+CLEAR_GUILD_COMMANDS_ON_STARTUP=false
+
+# Route of the Day (ROTD)
 ROTD_ENABLED=true
 ROTD_MIN_AIRPORT_SIZE=3
 ROTD_MAX_RETRY_ATTEMPTS=100
@@ -101,16 +104,17 @@ ROTD_SCHEDULE_TZ=UTC
 ROTD_SCHEDULE_HOUR=15
 ROTD_SCHEDULE_MINUTE=0
 
-# Aviation info
-AVIATION_INFO_ENABLED=true
-AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false
-
-# Crash recovery
+# Crash Handler Configuration
 MAX_RESTART_ATTEMPTS=5
 RESTART_DELAY_BASE=10
 EMERGENCY_CHANNEL_ID=
+RUN_SUPERVISED=false
 
-# Circuit breaker
+# Aviation Info
+AVIATION_INFO_ENABLED=true
+AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false
+
+# Circuit Breaker (HTTP) Configuration
 CB_FAILURE_THRESHOLD=3
 CB_OPEN_SECONDS=120
 CB_HALF_OPEN_PROBES=1
@@ -118,32 +122,34 @@ CB_HALF_OPEN_PROBES=1
 
 ## Run
 
-Standard run:
-
-```powershell
-python src\bot.py
-```
-
-This supports both modes using `RUN_SUPERVISED`:
-
-- `true`: supervised with restart logic.
-- `false`: direct run, useful for debugging.
-
-Alternative launcher (same runtime):
+Recommended launcher:
 
 ```powershell
 python src\main.py
 ```
 
+Alternative launcher (same runtime):
+
+```powershell
+python src\bot.py
+```
+
+`RUN_SUPERVISED` modes:
+
+- `true`: supervised with restart logic.
+- `false`: direct run, useful for debugging.
+
 ## Verify Functionality
 
-1. Start bot (`python src\bot.py`).
+1. Start bot.
 2. In Discord:
-- run `/check` and verify oil embed post.
-- run `/randomroute` and verify ROTD post.
+   - Run `/check` and verify oil embed post.
+   - Run `/randomroute` and verify ROTD post.
+   - Run `/plane` and `/airport`.
+   - Run `/research origin_code:EZE dest_code:JFK` (example).
 3. Run diagnostics:
-- `/system_health`
-- `/system_stats`
+   - `/system_health`
+   - `/system_stats`
 
 ## Discord Permissions
 
@@ -177,6 +183,9 @@ MfcOilAlert/
       module.py
     ops/
       module.py
+  shared/
+    formatting.py
+    module_contract.py
   config/
     config.py
   utils/
@@ -197,22 +206,28 @@ MfcOilAlert/
 
 ## Architecture Notes
 
-- `src/bot.py` is now thin: bootstraps app, delegates startup to runtime, and starts Discord.
-- `app/bootstrap.py` wires dependencies and modules.
-- Business behavior is encapsulated in feature modules.
-- `utils/` holds reusable technical services (HTTP clients, monitoring primitives, retry wrappers).
+- `src/bot.py` is thin and delegates lifecycle to modular runtime/application services.
+- `app/bootstrap.py` wires dependencies and module registration.
+- Feature behavior is encapsulated in `modules/*`.
+- Reusable technical services live in `utils/*`.
 
 ## Troubleshooting
 
-### `/randomroute` missing in Discord
+### Slash command missing in Discord
 
-- Ensure `ROTD_ENABLED=true` in `.env`.
-- Restart bot.
-- Wait for startup sync logs (`global` and `guild` sync).
+- Verify corresponding feature flag in `.env`:
+  - `/randomroute` requires `ROTD_ENABLED=true`.
+  - `/plane`, `/airport`, `/research` require `AVIATION_INFO_ENABLED=true`.
+- Restart bot after changing `.env`.
+- Check startup logs for command sync.
+
+### `/airport` does not accept `airport_id`
+
+- Set `AVIATION_AIRPORT_ID_LOOKUP_ENABLED=true` and restart.
 
 ### Bot starts but command says "application did not respond"
 
-- Check bot logs for exceptions in command handlers.
+- Check logs for exceptions in command handlers.
 - Verify channel IDs and permissions.
 
 ### Oil channel does not rename
