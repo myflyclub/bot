@@ -230,7 +230,7 @@ class AviationInfoModule:
             if len(origin_q) not in (3, 4) or len(dest_q) not in (3, 4):
                 self._queries_not_found += 1
                 await interaction.response.send_message(
-                    "Use valid IATA/ICAO codes for `origin_code` and `dest_code`.",
+                    "IATA/ICAO codes for `origin_code` and `dest_code` must be 3 or 4 characters long.",
                 )
                 return
             if origin_q == dest_q:
