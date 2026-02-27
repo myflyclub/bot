@@ -6,11 +6,7 @@ Produces a readable, styled plain-text report for channel posts.
 
 from typing import Any, Dict, List, Optional
 
-
-def _format_int(value: Any) -> str:
-    if isinstance(value, (int, float)):
-        return f"{int(value):,}"
-    return str(value)
+from shared.formatting import format_int
 
 
 def _format_charms(charms_a: List[Dict[str, Any]], charms_b: List[Dict[str, Any]], code_a: str, code_b: str) -> Optional[str]:
@@ -50,10 +46,10 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
     a_city_label = " ".join(f"{a_flag} {a_name}".split()).strip()
     b_city_label = " ".join(f"{b_flag} {b_name}".split()).strip()
 
-    pop_col = f"{a_city_label}: {_format_int(payload.get('pop_a', 0))}\n{b_city_label}: {_format_int(payload.get('pop_b', 0))}"
+    pop_col = f"{a_city_label}: {format_int(payload.get('pop_a', 0))}\n{b_city_label}: {format_int(payload.get('pop_b', 0))}"
     income_col = (
-        f"{a_city_label}: ${_format_int(payload.get('income_ppp_a', 0))}\n"
-        f"{b_city_label}: ${_format_int(payload.get('income_ppp_b', 0))}"
+        f"{a_city_label}: ${format_int(payload.get('income_ppp_a', 0))}\n"
+        f"{b_city_label}: ${format_int(payload.get('income_ppp_b', 0))}"
     )
 
     lines: List[str] = [
@@ -63,7 +59,7 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
         route_line,
         "",
         f"🌐 Flight Type: {payload.get('flight_type', '-')}",
-        f"📏 Distance: {_format_int(payload.get('distance_km', 0))} km",
+        f"📏 Distance: {format_int(payload.get('distance_km', 0))} km",
         f"🛬 Runway Restriction: {payload.get('runway_restriction', '-')}",
         f"🤝 Relationship: {payload.get('relation_text', '-')}",
         f"🧲 Affinity: {payload.get('affinities_text', '-')}",

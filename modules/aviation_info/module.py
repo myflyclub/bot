@@ -11,6 +11,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
+from shared.formatting import format_int
 from shared.module_contract import ModuleHealth, ModuleStats
 from utils.aviation_info_service import AviationInfoService
 
@@ -91,12 +92,6 @@ class AviationInfoModule:
             return ""
         base = 127397
         return chr(base + ord(code[0])) + chr(base + ord(code[1]))
-
-    @staticmethod
-    def _format_int(value: Any) -> str:
-        if isinstance(value, (int, float)):
-            return f"{int(value):,}"
-        return str(value)
 
     @staticmethod
     def _relationship_text(mutual_relationship: Any) -> str:
@@ -297,7 +292,7 @@ class AviationInfoModule:
             )
             embed.add_field(name="🌐 Flight Type", value=str(payload.get("flightType", "-")), inline=True)
             distance = payload.get("distance")
-            distance_text = f"{self._format_int(distance)} km" if isinstance(distance, (int, float)) else str(distance)
+            distance_text = f"{format_int(distance)} km" if isinstance(distance, (int, float)) else str(distance)
             embed.add_field(name="📏 Distance", value=distance_text, inline=True)
             embed.add_field(
                 name="🤝 Relationship",
@@ -314,16 +309,16 @@ class AviationInfoModule:
                 economy if isinstance(economy, (int, float)) else 0
             )
             direct_line = (
-                f"{self._format_int(economy_total)} / "
-                f"{self._format_int(business)} / "
-                f"{self._format_int(first)}"
+                f"{format_int(economy_total)} / "
+                f"{format_int(business)} / "
+                f"{format_int(first)}"
             )
             embed.add_field(name="👥 Direct Demand", value=direct_line, inline=False)
 
-            from_population = self._format_int(payload.get("fromAirportPopulation", 0))
-            to_population = self._format_int(payload.get("toAirportPopulation", 0))
-            from_income = self._format_int(payload.get("fromAirportIncome", 0))
-            to_income = self._format_int(payload.get("toAirportIncome", 0))
+            from_population = format_int(payload.get("fromAirportPopulation", 0))
+            to_population = format_int(payload.get("toAirportPopulation", 0))
+            from_income = format_int(payload.get("fromAirportIncome", 0))
+            to_income = format_int(payload.get("toAirportIncome", 0))
             from_label = str(payload.get("fromAirportText", from_iata)).split("(")[0].strip() or from_iata
             to_label = str(payload.get("toAirportText", to_iata)).split("(")[0].strip() or to_iata
             population_col = f"{from_label}: {from_population}\n{to_label}: {to_population}"
