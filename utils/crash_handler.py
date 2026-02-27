@@ -5,8 +5,6 @@ This module provides comprehensive crash detection, error tracking, and automati
 restart capabilities for the Oil Price Alert bot.
 """
 
-import os
-import sys
 import signal
 import traceback
 import logging
@@ -16,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 import discord
-from discord.ext import commands
 
 # Configure logging for crash handler
 crash_logger = logging.getLogger(__name__)
@@ -327,41 +324,3 @@ def with_crash_recovery(crash_handler: CrashHandler):
                     raise
             return sync_wrapper
     return decorator
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    async def test_crash_handler():
-        """Test the crash handler system"""
-        print("🧪 Testing Crash Handler")
-        print("=" * 40)
-        
-        # Create crash handler
-        crash_handler = create_crash_handler(
-            max_restart_attempts=3,
-            restart_delay_base=2
-        )
-        
-        print("✅ Crash handler created")
-        
-        # Test 1: Simulate a crash
-        try:
-            raise ValueError("Test crash for demonstration")
-        except Exception as e:
-            should_restart = await crash_handler.handle_crash(e, {'test': 'context'})
-            print(f"✅ Crash handled, should_restart: {should_restart}")
-        
-        # Test 2: Get crash stats
-        stats = crash_handler.get_crash_stats()
-        print("✅ Crash stats:")
-        for key, value in stats.items():
-            if key == 'crash_history':
-                print(f"   {key}: {len(value)} entries")
-            else:
-                print(f"   {key}: {value}")
-        
-        print("\n🎉 Crash handler tests completed!")
-    
-    # Run the test
-    import asyncio
-    asyncio.run(test_crash_handler())

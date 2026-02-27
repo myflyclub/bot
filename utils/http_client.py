@@ -10,7 +10,6 @@ import hashlib
 import logging
 import time
 from typing import Optional, Tuple, Dict, Any
-from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from config.config import Config
@@ -307,48 +306,3 @@ def create_http_client(base_url: str = "https://play.myfly.club/oil-prices",
                        base_polling_interval: int = 300) -> OilPriceHTTPClient:
     """Factory function to create a new HTTP client instance"""
     return OilPriceHTTPClient(base_url, base_polling_interval)
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Test the HTTP client
-    client = create_http_client()
-    
-    try:
-        print("🧪 Testing Oil Price HTTP Client")
-        print("=" * 40)
-        
-        # Test 1: Initial fetch
-        print("\n📡 Test 1: Initial fetch")
-        has_changed, content, response_info = client.fetch_oil_prices(use_conditional=False)
-        print(f"✅ Initial fetch: {'Changed' if has_changed else 'Unchanged'}")
-        print(f"   Status: {response_info.get('status_code', 'N/A')}")
-        print(f"   Response time: {response_info.get('response_time', 0):.2f}s")
-        
-        if content:
-            print(f"   Content length: {len(content)} characters")
-        
-        # Test 2: Conditional request (should return 304 if no changes)
-        print("\n🔄 Test 2: Conditional request")
-        has_changed, content, response_info = client.fetch_oil_prices(use_conditional=True)
-        print(f"✅ Conditional request: {'Changed' if has_changed else 'Unchanged'}")
-        print(f"   Status: {response_info.get('status_code', 'N/A')}")
-        
-        # Test 3: Get polling status
-        print("\n📊 Test 3: Polling status")
-        status = client.get_polling_status()
-        print("✅ Polling status:")
-        for key, value in status.items():
-            if key == 'next_poll_time':
-                print(f"   {key}: {time.strftime('%H:%M:%S', time.localtime(value))}")
-            else:
-                print(f"   {key}: {value}")
-        
-        print("\n🎉 HTTP client tests completed!")
-        
-    except Exception as e:
-        print(f"\n❌ Test failed with error: {e}")
-        logging.error(f"Test error: {e}", exc_info=True)
-    
-    finally:
-        client.close()
