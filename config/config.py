@@ -39,6 +39,10 @@ class Config:
     # Optional explicit test pair for ROTD
     ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
     ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')
+    
+    # Aviation info feature
+    AVIATION_INFO_ENABLED = os.getenv('AVIATION_INFO_ENABLED', 'true').lower() == 'true'
+    AVIATION_AIRPORT_ID_LOOKUP_ENABLED = os.getenv('AVIATION_AIRPORT_ID_LOOKUP_ENABLED', 'false').lower() == 'true'
 
     @classmethod
     def get_rotd_pair(cls):

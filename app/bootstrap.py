@@ -8,6 +8,7 @@ import logging
 
 from app.application import Application
 from app.module_registry import ModuleRegistry
+from modules.aviation_info import AviationInfoModule
 from modules.oil import OilModule
 from modules.ops import OpsModule
 from modules.rotd import RotdModule
@@ -34,6 +35,11 @@ def build_application(
             bot=bot,
             config=config,
             logger=logger_factory("rotd"),
+        ),
+        AviationInfoModule(
+            enabled=bool(config.AVIATION_INFO_ENABLED),
+            config=config,
+            logger=logger_factory("aviation_info"),
         ),
         OpsModule(
             enabled=True,

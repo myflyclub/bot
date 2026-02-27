@@ -4,6 +4,7 @@ Modular Discord bot for MyFly Club with two core services:
 
 - Oil monitoring: polls oil prices, posts updates, and renames the oil channel.
 - Route of the Day (ROTD): generates and posts random route reports.
+- Aviation info: live lookups for airport and airplane model metadata.
 
 The bot uses slash commands (`/`) and a modular runtime (`oil`, `rotd`, `ops`) with crash recovery and retry logic.
 
@@ -13,6 +14,7 @@ The bot uses slash commands (`/`) and a modular runtime (`oil`, `rotd`, `ops`) w
 - Modular architecture:
   - `oil` module: monitoring, health, stats, channel rename.
   - `rotd` module: random route command + daily posting loop.
+  - `aviation_info` module: live `/plane` and `/airport` lookups.
   - `ops` module: crash and system diagnostics.
 - Crash recovery and supervised mode.
 - Circuit breaker and retry handling for HTTP/Discord calls.
@@ -26,6 +28,8 @@ The bot registers these slash commands:
 - `/health`: oil runtime health snapshot.
 - `/stats`: oil session counters.
 - `/randomroute`: generate and post ROTD now.
+- `/plane`: search airplane models by name.
+- `/airport`: get airport details by IATA/ICAO code.
 - `/crash_stats`: crash handler stats (admin).
 - `/system_health`: aggregated health across modules (admin).
 - `/system_stats`: aggregated stats across modules (admin).
@@ -90,6 +94,10 @@ ROTD_MIN_AIRPORT_SIZE=3
 ROTD_MAX_RETRY_ATTEMPTS=100
 ROTD_ORIGIN_ID=
 ROTD_DEST_ID=
+
+# Aviation info
+AVIATION_INFO_ENABLED=true
+AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false
 
 # Crash recovery
 MAX_RESTART_ATTEMPTS=5
@@ -159,11 +167,14 @@ MfcOilAlert/
       module.py
     rotd/
       module.py
+    aviation_info/
+      module.py
     ops/
       module.py
   config/
     config.py
   utils/
+    aviation_info_service.py
     bot_supervisor.py
     crash_handler.py
     discord_client_wrapper.py
