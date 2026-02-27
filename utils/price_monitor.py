@@ -5,12 +5,10 @@ This module integrates the price parser and HTTP client to create a complete
 oil price monitoring system with change detection and local storage.
 """
 
-import json
 import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 
 from .price_parser import OilPriceParser, OilPriceData
 from .http_client import OilPriceHTTPClient
@@ -258,66 +256,3 @@ def create_monitor(base_url: str = "https://play.myfly.club/oil-prices",
                   polling_interval: int = 300) -> OilPriceMonitor:
     """Factory function to create a new monitor instance (v2: in-memory only)"""
     return OilPriceMonitor(base_url, polling_interval=polling_interval)
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Test the price monitor
-    monitor = create_monitor()
-    
-    try:
-        print("🧪 Testing Oil Price Monitor")
-        print("=" * 40)
-        
-        # Test 1: Check for updates
-        print("\n📡 Test 1: Checking for updates")
-        change_event = monitor.check_for_updates()
-        
-        if change_event:
-            print(f"✅ Price change detected:")
-            print(f"   Old price: ${change_event.old_price:.2f}" if change_event.old_price else "   Old price: None")
-            print(f"   New price: ${change_event.new_price:.2f}")
-            print(f"   Change: ${change_event.price_change:+.2f} ({change_event.price_change_percent:+.2f}%)")
-            print(f"   Event type: {change_event.event_type}")
-        else:
-            print("✅ No significant price changes detected")
-        
-        # Test 2: Get current price
-        print("\n💰 Test 2: Current price")
-        current_price = monitor.get_current_price()
-        if current_price:
-            print(f"✅ Current price: ${current_price.price:.2f} (Cycle: {current_price.cycle})")
-        else:
-            print("❌ No current price available")
-        
-        # Test 3: Get monitoring status
-        print("\n📊 Test 3: Monitoring status")
-        status = monitor.get_monitoring_status()
-        print("✅ Monitoring status:")
-        for key, value in status.items():
-            if key == 'http_client_status':
-                print(f"   {key}: HTTP client details available")
-            else:
-                print(f"   {key}: {value}")
-        
-        # Test 4: Get price change summary
-        print("\n📈 Test 4: Price change summary")
-        summary = monitor.get_price_change_summary()
-        print(f"✅ Price summary (v2: in-memory):")
-        if summary['current_price']:
-            print(f"   Current price: ${summary['current_price']:.2f}")
-            print(f"   Current cycle: {summary['current_cycle']}")
-        else:
-            print("   Current price: Not available")
-        print(f"   Session duration: {summary['session_stats']['session_duration']:.1f}s")
-        print(f"   Updates processed: {summary['session_stats']['total_updates_processed']}")
-        print(f"   Changes detected: {summary['session_stats']['total_changes_detected']}")
-        
-        print("\n🎉 Price monitor tests completed!")
-        
-    except Exception as e:
-        print(f"\n❌ Test failed with error: {e}")
-        logging.error(f"Test error: {e}", exc_info=True)
-    
-    finally:
-        monitor.close()

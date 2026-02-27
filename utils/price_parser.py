@@ -7,7 +7,7 @@ and extracts the latest price based on the highest cycle number.
 
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 
 # Configure logging
@@ -131,25 +131,6 @@ class OilPriceParser:
         logger.info(f"Latest oil price: ${latest_entry.price:.2f} (Cycle: {latest_entry.cycle})")
         return latest_entry
     
-    def get_latest_price_from_file(self, file_path: str) -> OilPriceData:
-        """
-        Extract the latest oil price from a JSON file (for testing)
-        
-        Args:
-            file_path: Path to JSON file
-            
-        Returns:
-            OilPriceData object with the latest price
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                json_string = file.read()
-            return self.get_latest_price(json_string)
-        except FileNotFoundError:
-            raise ValueError(f"File not found: {file_path}")
-        except Exception as e:
-            raise ValueError(f"Error reading file: {e}")
-    
     def get_price_history(self, json_string: str, limit: int = 10) -> List[OilPriceData]:
         """
         Get recent price history from JSON response
@@ -219,64 +200,3 @@ class OilPriceParser:
         
         return stats
 
-    def get_price_history_from_file(self, file_path: str, limit: int = 10) -> List[OilPriceData]:
-        """
-        Get recent price history from a JSON file (for testing)
-        
-        Args:
-            file_path: Path to JSON file
-            limit: Maximum number of recent entries to return
-            
-        Returns:
-            List of recent OilPriceData objects, sorted by cycle (newest first)
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                json_string = file.read()
-            return self.get_price_history(json_string, limit)
-        except FileNotFoundError:
-            raise ValueError(f"File not found: {file_path}")
-        except Exception as e:
-            raise ValueError(f"Error reading file: {e}")
-    
-    def get_statistics_from_file(self, file_path: str) -> Dict[str, Union[float, int]]:
-        """
-        Get basic statistics from a JSON file (for testing)
-        
-        Args:
-            file_path: Path to JSON file
-            
-        Returns:
-            Dictionary with statistics
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                json_string = file.read()
-            return self.get_statistics(json_string)
-        except FileNotFoundError:
-            raise ValueError(f"File not found: {file_path}")
-        except Exception as e:
-            raise ValueError(f"Error reading file: {e}")
-
-
-def create_parser() -> OilPriceParser:
-    """Factory function to create a new OilPriceParser instance"""
-    return OilPriceParser()
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Test with the sample data
-    parser = OilPriceParser()
-    
-    try:
-        # Test parsing from file
-        latest_price = parser.get_latest_price_from_file("oil-prices.json")
-        print(f"Latest price: ${latest_price.price:.2f} (Cycle: {latest_price.cycle})")
-        
-        # Test statistics
-        stats = parser.get_statistics_from_file("oil-prices.json")
-        print(f"Statistics: {stats}")
-        
-    except Exception as e:
-        print(f"Error: {e}")
