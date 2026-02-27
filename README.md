@@ -88,6 +88,14 @@ DISCORD_RROTD_CHANNEL=
 OIL_PRICE_URL=https://play.myfly.club/oil-prices
 POLLING_INTERVAL=180
 
+# MyFly API Configuration
+MFC_BASE_URL=https://play.myfly.club
+MFC_SEARCH_ROUTE_PATH_TEMPLATE=/search-route/{origin_id}/{dest_id}
+MFC_RESEARCH_LINK_PATH_TEMPLATE=/research-link/{origin_id}/{dest_id}
+MFC_AIRPORT_BY_ID_PATH_TEMPLATE=/airports/{airport_id}
+MFC_AIRPORTS_PATH=/airports
+MFC_AIRPLANE_MODELS_PATH=/airplane-models
+
 # Bot Configuration
 BOT_STATUS=Testing Aviation Info
 CLEAR_GUILD_COMMANDS_ON_STARTUP=false

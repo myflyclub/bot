@@ -79,10 +79,14 @@ def _create_session() -> requests.Session:
 
 
 class MyFlyApiClient:
-    BASE = "https://play.myfly.club"
-
     def __init__(self):
         self.session = _create_session()
+        self.base_url = Config.MFC_BASE_URL
+        self.search_route_path_template = Config.MFC_SEARCH_ROUTE_PATH_TEMPLATE
+        self.research_link_path_template = Config.MFC_RESEARCH_LINK_PATH_TEMPLATE
+        self.airport_by_id_path_template = Config.MFC_AIRPORT_BY_ID_PATH_TEMPLATE
+        self.airports_path = Config.MFC_AIRPORTS_PATH
+        self.airplane_models_path = Config.MFC_AIRPLANE_MODELS_PATH
         self.breaker = SimpleCircuitBreaker(
             failure_threshold=Config.CB_FAILURE_THRESHOLD,
             open_seconds=Config.CB_OPEN_SECONDS,
@@ -93,7 +97,7 @@ class MyFlyApiClient:
         if not self.breaker.before_request():
             logger.warning("ROTD breaker open; skipping request %s", path)
             return None
-        url = f"{self.BASE}{path}"
+        url = f"{self.base_url}{path}"
         try:
             resp = self.session.get(url, timeout=timeout)
             if resp.status_code == 200:
@@ -109,25 +113,25 @@ class MyFlyApiClient:
             return None
 
     def search_route(self, origin_id: int, dest_id: int) -> Optional[Dict[str, Any]]:
-        return self._get(f"/search-route/{origin_id}/{dest_id}")
+        return self._get(self.search_route_path_template.format(origin_id=origin_id, dest_id=dest_id))
 
     def research_link(self, origin_id: int, dest_id: int) -> Optional[Dict[str, Any]]:
-        return self._get(f"/research-link/{origin_id}/{dest_id}")
+        return self._get(self.research_link_path_template.format(origin_id=origin_id, dest_id=dest_id))
 
     def get_airport(self, airport_id: int) -> Optional[Dict[str, Any]]:
         """Fetch airport details by ID. Used for random selection."""
-        return self._get(f"/airports/{airport_id}")
+        return self._get(self.airport_by_id_path_template.format(airport_id=airport_id))
 
     def get_all_airports(self) -> Optional[list]:
         """Fetch the complete list of airports. Returns list of airport dicts."""
-        result = self._get("/airports")
+        result = self._get(self.airports_path)
         if result and isinstance(result, list):
             return result
         return None
 
     def get_airplane_models(self) -> Optional[list]:
         """Fetch airplane models from the global endpoint (no auth required)."""
-        result = self._get("/airplane-models")
+        result = self._get(self.airplane_models_path)
         if result and isinstance(result, list):
             return result
         return None
