@@ -30,19 +30,12 @@ class Config:
         POLLING_INTERVAL = 300
     
     # Bot Configuration
-    BOT_PREFIX = os.getenv('BOT_PREFIX', '!')
     BOT_STATUS = os.getenv('BOT_STATUS', 'Monitoring Oil Prices')
-    
-    # Logging Configuration
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
     # ROTD Feature Configuration
     ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
     ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
     ROTD_MAX_RETRY_ATTEMPTS = int(os.getenv('ROTD_MAX_RETRY_ATTEMPTS', '100'))
-    # Optional immediate run via CLI flag handled in bot; keep env for CI toggles
-    ROTD_ONCE_ENV = os.getenv('ROTD_ONCE', 'false').lower() == 'true'
-
     # Optional explicit test pair for ROTD
     ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
     ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')
