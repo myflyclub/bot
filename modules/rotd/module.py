@@ -7,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -58,6 +59,10 @@ class RotdModule:
         if not channel_id:
             self.logger.info("ROTD disabled at runtime: channel not configured")
             return
+        schedule_enabled = bool(getattr(self.config, "ROTD_SCHEDULE_ENABLED", False)) if self.config else False
+        if not schedule_enabled:
+            self.logger.info("ROTD scheduler disabled (ROTD_SCHEDULE_ENABLED=false); use /randomroute for manual runs")
+            return
         if self._daily_task and not self._daily_task.done():
             return
         self._daily_task = asyncio.create_task(self._daily_loop())
@@ -93,15 +98,40 @@ class RotdModule:
         )
 
     async def _daily_loop(self) -> None:
-        await asyncio.sleep(5)
         while True:
             try:
+                next_run_utc = self._next_scheduled_run_utc()
+                now_utc = datetime.now(timezone.utc)
+                sleep_seconds = max(1, int((next_run_utc - now_utc).total_seconds()))
+                self.logger.info(
+                    "ROTD next scheduled run at %s UTC (in %ss)",
+                    next_run_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                    sleep_seconds,
+                )
+                await asyncio.sleep(sleep_seconds)
                 await self.post_once()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 self.logger.error("ROTD daily task error: %s", e)
-            await asyncio.sleep(24 * 3600)
+
+    def _next_scheduled_run_utc(self) -> datetime:
+        """Return next schedule execution as UTC datetime."""
+        tz_name = getattr(self.config, "ROTD_SCHEDULE_TZ", "UTC") if self.config else "UTC"
+        hour = int(getattr(self.config, "ROTD_SCHEDULE_HOUR", 15)) if self.config else 15
+        minute = int(getattr(self.config, "ROTD_SCHEDULE_MINUTE", 0)) if self.config else 0
+
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            self.logger.warning("Invalid ROTD_SCHEDULE_TZ=%s, falling back to UTC", tz_name)
+            local_tz = timezone.utc
+
+        now_local = datetime.now(local_tz)
+        target_local = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now_local >= target_local:
+            target_local = target_local + timedelta(days=1)
+        return target_local.astimezone(timezone.utc)
 
     async def post_once(self) -> bool:
         channel_id = self.config.get_rrotd_channel_id() if self.config else None

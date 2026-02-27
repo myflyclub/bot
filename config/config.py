@@ -39,6 +39,22 @@ class Config:
     # Optional explicit test pair for ROTD
     ROTD_ORIGIN_ID = os.getenv('ROTD_ORIGIN_ID')
     ROTD_DEST_ID = os.getenv('ROTD_DEST_ID')
+    ROTD_SCHEDULE_ENABLED = os.getenv('ROTD_SCHEDULE_ENABLED', 'false').lower() == 'true'
+    ROTD_SCHEDULE_TZ = os.getenv('ROTD_SCHEDULE_TZ', 'UTC')
+    _rotd_hour_raw = os.getenv('ROTD_SCHEDULE_HOUR', '15')
+    _rotd_minute_raw = os.getenv('ROTD_SCHEDULE_MINUTE', '0')
+    try:
+        ROTD_SCHEDULE_HOUR = int((_rotd_hour_raw or '15').split('#')[0].strip())
+    except ValueError:
+        ROTD_SCHEDULE_HOUR = 15
+    try:
+        ROTD_SCHEDULE_MINUTE = int((_rotd_minute_raw or '0').split('#')[0].strip())
+    except ValueError:
+        ROTD_SCHEDULE_MINUTE = 0
+    if ROTD_SCHEDULE_HOUR < 0 or ROTD_SCHEDULE_HOUR > 23:
+        ROTD_SCHEDULE_HOUR = 15
+    if ROTD_SCHEDULE_MINUTE < 0 or ROTD_SCHEDULE_MINUTE > 59:
+        ROTD_SCHEDULE_MINUTE = 0
     
     # Aviation info feature
     AVIATION_INFO_ENABLED = os.getenv('AVIATION_INFO_ENABLED', 'true').lower() == 'true'

@@ -47,10 +47,13 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
 
     route_line = f"{a_code} {a_flag} -> {b_code} {b_flag}".strip()
 
-    pop_col = f"{a_name}: {_format_int(payload.get('pop_a', 0))}\n{b_name}: {_format_int(payload.get('pop_b', 0))}"
+    a_city_label = " ".join(f"{a_flag} {a_name}".split()).strip()
+    b_city_label = " ".join(f"{b_flag} {b_name}".split()).strip()
+
+    pop_col = f"{a_city_label}: {_format_int(payload.get('pop_a', 0))}\n{b_city_label}: {_format_int(payload.get('pop_b', 0))}"
     income_col = (
-        f"{a_name}: ${_format_int(payload.get('income_ppp_a', 0))}\n"
-        f"{b_name}: ${_format_int(payload.get('income_ppp_b', 0))}"
+        f"{a_city_label}: ${_format_int(payload.get('income_ppp_a', 0))}\n"
+        f"{b_city_label}: ${_format_int(payload.get('income_ppp_b', 0))}"
     )
 
     lines: List[str] = [
@@ -98,7 +101,6 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
         for seg in data.get("segments", []):
             seg_from = seg.get("from", "-")
             seg_to = seg.get("to", "-")
-            lines.append(f"🛫 {seg_from} -> {seg_to}")
 
             carrier = seg.get("carrier", "-")
             code = seg.get("code", "-")
@@ -111,13 +113,14 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
             amenities_text = ", ".join(amenities) if amenities else "none"
             carrier_l = str(carrier).strip().lower()
             is_local_transit = carrier_l in {"local transit", "local transfer"}
+            lines.append(f"{'🚕' if is_local_transit else '🛫'} {seg_from} -> {seg_to}")
             if is_local_transit:
                 # Local hops usually have no flight number/aircraft; show a cleaner transfer line.
                 lines.append(f"🚌🚇 Local transfer | {duration}")
             else:
                 lines.append(f"✈️ {carrier} - {code}")
                 lines.append(
-                    f"{aircraft} | ⏱️ {duration} | 💵 {price} ({cabin}) | ⭐ {quality} | 🎁 {amenities_text}"
+                    f"{aircraft} | ⏱️ {duration} | 💵 {price} ({cabin}) | ⭐ {quality} | 🖥️ {amenities_text}"
                 )
         lines.append("")
 

@@ -64,14 +64,33 @@ class ROTDService:
         - Retry up to max_attempts if validation fails
         """
         min_size = Config.ROTD_MIN_AIRPORT_SIZE
-        max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
+        configured_max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
+        # Progressive relaxation strategy requires enough budget to reach phase 3.
+        max_attempts = max(configured_max_attempts, 200)
         
         # Initialize max ID if needed (one-time operation)
         max_id = self._initialize_max_id()
         
-        logger.info(f"ROTD: Searching for random airport pair (ID range: 1-{max_id}, min_size={min_size})")
+        logger.info(
+            "ROTD: Searching for random airport pair "
+            f"(ID range: 1-{max_id}, phase1={min_size}/{min_size} <=50, "
+            f"phase2={min_size}/{max(2, min_size - 1)} <=100, "
+            f"phase3={max(2, min_size - 1)}/{max(2, min_size - 1)} <=200, "
+            f"configured_max_attempts={configured_max_attempts}, effective_max_attempts={max_attempts})"
+        )
         
         for attempt in range(max_attempts):
+            attempt_no = attempt + 1
+            if attempt_no <= 50:
+                min_size_origin = min_size
+                min_size_dest = min_size
+            elif attempt_no <= 100:
+                min_size_origin = min_size
+                min_size_dest = max(2, min_size - 1)
+            else:
+                min_size_origin = max(2, min_size - 1)
+                min_size_dest = max(2, min_size - 1)
+
             # Generate two different random IDs
             origin_id = random.randint(1, max_id)
             dest_id = random.randint(1, max_id)
@@ -83,22 +102,26 @@ class ROTDService:
             try:
                 origin_airport = self.client.get_airport(origin_id)
                 if not origin_airport:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {origin_id} not found")
+                    logger.debug(f"ROTD attempt {attempt_no}: Airport {origin_id} not found")
                     continue
                 
                 origin_size = origin_airport.get('size', 0)
-                if origin_size < min_size:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {origin_id} size {origin_size} < {min_size}")
+                if origin_size < min_size_origin:
+                    logger.debug(
+                        f"ROTD attempt {attempt_no}: Airport {origin_id} size {origin_size} < {min_size_origin} (origin)"
+                    )
                     continue
                 
                 dest_airport = self.client.get_airport(dest_id)
                 if not dest_airport:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {dest_id} not found")
+                    logger.debug(f"ROTD attempt {attempt_no}: Airport {dest_id} not found")
                     continue
                 
                 dest_size = dest_airport.get('size', 0)
-                if dest_size < min_size:
-                    logger.debug(f"ROTD attempt {attempt+1}: Airport {dest_id} size {dest_size} < {min_size}")
+                if dest_size < min_size_dest:
+                    logger.debug(
+                        f"ROTD attempt {attempt_no}: Airport {dest_id} size {dest_size} < {min_size_dest} (dest)"
+                    )
                     continue
                 
                 # Validate routes exist
@@ -106,13 +129,13 @@ class ROTDService:
                 if route and isinstance(route, list) and len(route) > 0:
                     origin_iata = origin_airport.get('iata', '?')
                     dest_iata = dest_airport.get('iata', '?')
-                    logger.info(f"ROTD: Found valid pair after {attempt+1} attempts: {origin_id} ({origin_iata}) -> {dest_id} ({dest_iata})")
+                    logger.info(f"ROTD: Found valid pair after {attempt_no} attempts: {origin_id} ({origin_iata}) -> {dest_id} ({dest_iata})")
                     return (origin_id, dest_id)
                 else:
-                    logger.debug(f"ROTD attempt {attempt+1}: No routes for {origin_id}->{dest_id}")
+                    logger.debug(f"ROTD attempt {attempt_no}: No routes for {origin_id}->{dest_id}")
             
             except Exception as e:
-                logger.debug(f"ROTD attempt {attempt+1}: Validation error for {origin_id}->{dest_id}: {e}")
+                logger.debug(f"ROTD attempt {attempt_no}: Validation error for {origin_id}->{dest_id}: {e}")
                 continue
         
         logger.warning(f"ROTD: Could not find valid random airport pair after {max_attempts} attempts")
@@ -269,7 +292,7 @@ class ROTDService:
                 try:
                     total_price = sum(int(s.get('price', 0)) if isinstance(s.get('price'), (int, float)) else 0 for s in raw_segments)
                     cabin = segs[0]['cabin'] if segs else 'Economy'
-                    summary = f"{path} - ${total_price} ({cabin})"
+                    summary = f"{path} - 💵 ${total_price} ({cabin})"
                 except:
                     summary = path
             else:
