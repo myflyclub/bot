@@ -1,4 +1,4 @@
-﻿"""
+"""
 Aviation Info module: slash commands for live plane/airport lookup.
 """
 
@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
 
-from shared.formatting import format_int
+from shared.formatting import country_flag, format_int, relationship_text
 from shared.module_contract import ModuleHealth, ModuleStats
 from utils.aviation_info_service import AviationInfoService
 
@@ -57,8 +57,8 @@ class AviationInfoModule:
             )
             async def airport_command(
                 interaction: discord.Interaction,
-                airport_id: int | None = None,
-                code: str | None = None,
+                airport_id: Optional[int] = None,
+                code: Optional[str] = None,
             ):
                 await self._handle_airport_command(interaction, airport_id=airport_id, code=code)
         else:
@@ -84,27 +84,6 @@ class AviationInfoModule:
         except (TypeError, ValueError):
             return "-"
         return f"{score:g} stars"
-
-    @staticmethod
-    def _country_flag(country_code: Any) -> str:
-        code = str(country_code or "").strip().upper()
-        if len(code) != 2 or not code.isalpha():
-            return ""
-        base = 127397
-        return chr(base + ord(code[0])) + chr(base + ord(code[1]))
-
-    @staticmethod
-    def _relationship_text(mutual_relationship: Any) -> str:
-        if not isinstance(mutual_relationship, (int, float)):
-            return "Unknown"
-        score = int(mutual_relationship)
-        if score >= 2:
-            return f"{score} (Excellent)"
-        if score >= 1:
-            return f"{score} (Good)"
-        if score <= -1:
-            return f"{score} (Poor)"
-        return f"{score} (Neutral)"
 
     async def _handle_plane_command(self, interaction: discord.Interaction, model: str) -> None:
         self._queries_total += 1
@@ -165,16 +144,17 @@ class AviationInfoModule:
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("plane command failed: %s", e, exc_info=True)
+            user_msg = "An error occurred while retrieving plane data. Please try again later."
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}")
+                await interaction.followup.send(user_msg)
             else:
-                await interaction.response.send_message(f"Error: {e}")
+                await interaction.response.send_message(user_msg)
 
     async def _handle_airport_command(
         self,
         interaction: discord.Interaction,
-        airport_id: int | None,
-        code: str | None,
+        airport_id: Optional[int],
+        code: Optional[str],
     ) -> None:
         self._queries_total += 1
         self._queries_airport += 1
@@ -208,10 +188,10 @@ class AviationInfoModule:
                 return
 
             normalized = self.service.normalize_airport(airport)
-            country_flag = self._country_flag(normalized.get("country_code"))
+            country_flag_value = country_flag(normalized.get("country_code"))
             country_text = str(normalized["country"])
-            if country_flag:
-                country_text = f"{country_text} {country_flag}"
+            if country_flag_value:
+                country_text = f"{country_text} {country_flag_value}"
             embed = discord.Embed(
                 title=f"Airport: {normalized['name']}",
                 color=discord.Color.green(),
@@ -230,10 +210,11 @@ class AviationInfoModule:
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("airport command failed: %s", e, exc_info=True)
+            user_msg = "An error occurred while retrieving airport data. Please try again later."
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}")
+                await interaction.followup.send(user_msg)
             else:
-                await interaction.response.send_message(f"Error: {e}")
+                await interaction.response.send_message(user_msg)
 
     async def _handle_research_command(
         self,
@@ -270,8 +251,8 @@ class AviationInfoModule:
 
             from_code = payload.get("fromAirportCountryCode", "")
             to_code = payload.get("toAirportCountryCode", "")
-            from_flag = self._country_flag(from_code)
-            to_flag = self._country_flag(to_code)
+            from_flag = country_flag(from_code)
+            to_flag = country_flag(to_code)
             from_iata = payload.get("fromAirportIata", origin_q)
             to_iata = payload.get("toAirportIata", dest_q)
             route_text = f"{from_iata} {from_flag} -> {to_iata} {to_flag}".strip()
@@ -288,7 +269,7 @@ class AviationInfoModule:
             embed.add_field(name="📏 Distance", value=distance_text, inline=True)
             embed.add_field(
                 name="🤝 Relationship",
-                value=self._relationship_text(payload.get("mutualRelationship")),
+                value=relationship_text(payload.get("mutualRelationship")),
                 inline=True,
             )
             embed.add_field(name="🧲 Affinity", value=str(payload.get("affinity", "-")), inline=False)
@@ -323,10 +304,11 @@ class AviationInfoModule:
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("research command failed: %s", e, exc_info=True)
+            user_msg = "An error occurred while retrieving route research data. Please try again later."
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}")
+                await interaction.followup.send(user_msg)
             else:
-                await interaction.response.send_message(f"Error: {e}")
+                await interaction.response.send_message(user_msg)
 
     async def start(self) -> None:
         return None

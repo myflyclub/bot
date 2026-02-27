@@ -1,4 +1,4 @@
-﻿"""
+"""
 Formatter for Route of the Day (ROTD) messages.
 
 Produces a readable, styled plain-text report for channel posts.

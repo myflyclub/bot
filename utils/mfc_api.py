@@ -125,7 +125,7 @@ class MyFlyApiClient:
             return result
         return None
 
-    def get_airplane_models(self, airline_id: Optional[int] = None) -> Optional[list]:
+    def get_airplane_models(self) -> Optional[list]:
         """Fetch airplane models from the global endpoint (no auth required)."""
         result = self._get("/airplane-models")
         if result and isinstance(result, list):
