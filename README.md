@@ -202,16 +202,6 @@ MfcOilAlert/
 
 - Ensure bot has `Manage Channels` in role and channel overrides.
 
-### Multiple bot instances
-
-Stop all local bot processes:
-
-```powershell
-Get-CimInstance Win32_Process |
-Where-Object { $_.Name -match '^python(\\.exe)?$' -and ($_.CommandLine -match 'src\\bot.py' -or $_.CommandLine -match 'src\\main.py' -or $_.CommandLine -match 'MfcOilAlert') } |
-ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-```
-
 ## Security
 
 - Do not commit `.env`.
