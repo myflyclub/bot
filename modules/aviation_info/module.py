@@ -115,17 +115,15 @@ class AviationInfoModule:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
                     "Please provide at least 2 characters for `model`.",
-                    ephemeral=True,
                 )
                 return
 
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await interaction.response.defer(thinking=True)
             matches = self.service.search_models(query=query, limit=5)
             if not matches:
                 self._queries_not_found += 1
                 await interaction.followup.send(
                     f"No airplane model matches found for `{query}`.",
-                    ephemeral=True,
                 )
                 return
 
@@ -163,14 +161,14 @@ class AviationInfoModule:
                 embed.add_field(name="🧩 Other Matches", value="\n".join(alternatives), inline=False)
 
             self._queries_success += 1
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("plane command failed: %s", e, exc_info=True)
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+                await interaction.followup.send(f"Error: {e}")
             else:
-                await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+                await interaction.response.send_message(f"Error: {e}")
 
     async def _handle_airport_command(
         self,
@@ -185,18 +183,16 @@ class AviationInfoModule:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
                     "Provide `airport_id` or `code`.",
-                    ephemeral=True,
                 )
                 return
             if airport_id is not None and airport_id <= 0:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
                     "Airport ID must be a positive integer.",
-                    ephemeral=True,
                 )
                 return
 
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await interaction.response.defer(thinking=True)
             airport = None
             if airport_id is not None:
                 airport = self.service.get_airport_by_id(airport_id)
@@ -208,7 +204,6 @@ class AviationInfoModule:
                 lookup_ref = f"id `{airport_id}`" if airport_id is not None else f"code `{code}`"
                 await interaction.followup.send(
                     f"Airport with {lookup_ref} was not found.",
-                    ephemeral=True,
                 )
                 return
 
@@ -231,14 +226,14 @@ class AviationInfoModule:
             embed.add_field(name="🛬 Runway", value=runway_text, inline=True)
 
             self._queries_success += 1
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("airport command failed: %s", e, exc_info=True)
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+                await interaction.followup.send(f"Error: {e}")
             else:
-                await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+                await interaction.response.send_message(f"Error: {e}")
 
     async def _handle_research_command(
         self,
@@ -255,24 +250,21 @@ class AviationInfoModule:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
                     "Use valid IATA/ICAO codes for `origin_code` and `dest_code`.",
-                    ephemeral=True,
                 )
                 return
             if origin_q == dest_q:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
                     "`origin_code` and `dest_code` must be different.",
-                    ephemeral=True,
                 )
                 return
 
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await interaction.response.defer(thinking=True)
             payload = self.service.get_research_by_codes(origin_q, dest_q)
             if not payload:
                 self._queries_not_found += 1
                 await interaction.followup.send(
                     f"Research data not found for `{origin_q} -> {dest_q}`.",
-                    ephemeral=True,
                 )
                 return
 
@@ -327,14 +319,14 @@ class AviationInfoModule:
             embed.add_field(name="💰 Income per Capita", value=income_col, inline=True)
 
             self._queries_success += 1
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             self._queries_failed += 1
             self.logger.error("research command failed: %s", e, exc_info=True)
             if interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}", ephemeral=True)
+                await interaction.followup.send(f"Error: {e}")
             else:
-                await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+                await interaction.response.send_message(f"Error: {e}")
 
     async def start(self) -> None:
         return None
