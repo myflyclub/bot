@@ -147,7 +147,12 @@ class AviationInfoService:
                 continue
             # Prefer exact name starts, then smaller names, then stable fallback
             starts = 0 if name.lower().startswith(q) else 1
-            score = (starts, len(name), name.lower())
+            model_id = _pick(item, ["id", "airplaneModelId"], default=0)
+            try:
+                model_id_key = int(model_id)
+            except (TypeError, ValueError):
+                model_id_key = 0
+            score = (starts, len(name), name.lower(), model_id_key)
             scored.append((score, item))
 
         scored.sort(key=lambda x: x[0])

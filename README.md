@@ -1,4 +1,4 @@
-﻿# MfcOilAlert
+# MfcOilAlert
 
 Modular Discord bot for MyFly Club with two core services:
 

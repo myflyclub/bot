@@ -1,4 +1,4 @@
-﻿"""
+"""
 Oil feature module.
 
 Contains oil lifecycle, background monitoring, and slash commands.

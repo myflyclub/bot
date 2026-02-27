@@ -46,14 +46,18 @@ class Config:
     try:
         ROTD_SCHEDULE_HOUR = int((_rotd_hour_raw or '15').split('#')[0].strip())
     except ValueError:
+        print(f"Warning: Invalid ROTD_SCHEDULE_HOUR '{_rotd_hour_raw}', using default 15")
         ROTD_SCHEDULE_HOUR = 15
     try:
         ROTD_SCHEDULE_MINUTE = int((_rotd_minute_raw or '0').split('#')[0].strip())
     except ValueError:
+        print(f"Warning: Invalid ROTD_SCHEDULE_MINUTE '{_rotd_minute_raw}', using default 0")
         ROTD_SCHEDULE_MINUTE = 0
     if ROTD_SCHEDULE_HOUR < 0 or ROTD_SCHEDULE_HOUR > 23:
+        print(f"Warning: ROTD_SCHEDULE_HOUR '{ROTD_SCHEDULE_HOUR}' out of range 0-23, using default 15")
         ROTD_SCHEDULE_HOUR = 15
     if ROTD_SCHEDULE_MINUTE < 0 or ROTD_SCHEDULE_MINUTE > 59:
+        print(f"Warning: ROTD_SCHEDULE_MINUTE '{ROTD_SCHEDULE_MINUTE}' out of range 0-59, using default 0")
         ROTD_SCHEDULE_MINUTE = 0
     
     # Aviation info feature
