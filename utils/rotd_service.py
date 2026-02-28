@@ -59,9 +59,10 @@ class ROTDService:
             logger.info(f"ROTD: Found {len(airports)} airports, max ID: {max_id}")
             return max_id
         else:
-            logger.warning("ROTD: Failed to fetch airports, using fallback max ID of 5000")
-            self._max_airport_id = 5000
-            return 5000
+            fallback_max_id = Config.ROTD_FALLBACK_MAX_AIRPORT_ID
+            logger.warning("ROTD: Failed to fetch airports, using fallback max ID of %s", fallback_max_id)
+            self._max_airport_id = fallback_max_id
+            return fallback_max_id
 
     def _select_candidate_pair(self) -> Optional[Tuple[int, int]]:
         """
@@ -78,7 +79,9 @@ class ROTDService:
         min_size = Config.ROTD_MIN_AIRPORT_SIZE
         min_distance_km = Config.ROTD_MIN_DISTANCE_KM
         configured_max_attempts = Config.ROTD_MAX_RETRY_ATTEMPTS
-        safety_floor_attempts = 5000
+        safety_floor_attempts = Config.ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS
+        dest_max_size_filter_enabled = Config.ROTD_DEST_MAX_SIZE_FILTER_ENABLED
+        dest_max_size = Config.ROTD_DEST_MAX_SIZE
         effective_max_attempts = max(configured_max_attempts, safety_floor_attempts)
         
         # Initialize max ID if needed (one-time operation)
@@ -90,6 +93,8 @@ class ROTDService:
             f"phase2={min_size}/{max(2, min_size - 1)} <=100, "
             f"phase3={max(2, min_size - 1)}/{max(2, min_size - 1)} >100, "
             f"min_distance_km={min_distance_km}, "
+            f"dest_max_size_filter_enabled={dest_max_size_filter_enabled}, "
+            f"dest_max_size={dest_max_size}, "
             f"configured_max_attempts={configured_max_attempts}, effective_max_attempts={effective_max_attempts})"
         )
 
@@ -101,6 +106,8 @@ class ROTDService:
             )
 
         attempt_no = 0
+        restart_count = 0
+        total_attempts = 0
         while True:
             # If API is unhealthy (breaker open), stop trying and let caller skip this cycle.
             if getattr(self.client.breaker, "state", None) == "open":
@@ -108,12 +115,16 @@ class ROTDService:
                 return None
 
             attempt_no += 1
+            total_attempts += 1
             if attempt_no > effective_max_attempts:
+                restart_count += 1
                 logger.warning(
-                    "ROTD: Could not find valid random airport pair after %s attempts (safety limit reached)",
+                    "ROTD: Could not find valid pair after %s attempts in this cycle; restarting search (restart=%s, total_attempts=%s)",
                     effective_max_attempts,
+                    restart_count,
+                    total_attempts,
                 )
-                return None
+                attempt_no = 1
             if attempt_no <= 50:
                 min_size_origin = min_size
                 min_size_dest = min_size
@@ -162,6 +173,15 @@ class ROTDService:
                 if dest_size < min_size_dest:
                     logger.debug(
                         f"ROTD attempt {attempt_no}: Airport {dest_id} size {dest_size} < {min_size_dest} (dest)"
+                    )
+                    continue
+                if dest_max_size_filter_enabled and dest_size >= dest_max_size:
+                    logger.debug(
+                        "ROTD attempt %s: Airport %s size %s is not < %s (dest max filter)",
+                        attempt_no,
+                        dest_id,
+                        dest_size,
+                        dest_max_size,
                     )
                     continue
                 
