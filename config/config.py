@@ -65,6 +65,46 @@ class Config:
     ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
     ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
     ROTD_MAX_RETRY_ATTEMPTS = int(os.getenv('ROTD_MAX_RETRY_ATTEMPTS', '100'))
+    _rotd_selection_floor_raw = os.getenv('ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS', '500')
+    try:
+        ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS = int((_rotd_selection_floor_raw or '500').split('#')[0].strip())
+    except ValueError:
+        print(
+            f"Warning: Invalid ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS "
+            f"'{_rotd_selection_floor_raw}', using default 500"
+        )
+        ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS = 500
+    if ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS < 1:
+        print(
+            f"Warning: ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS "
+            f"'{ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS}' must be >= 1, using default 500"
+        )
+        ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS = 500
+    _rotd_fallback_max_id_raw = os.getenv('ROTD_FALLBACK_MAX_AIRPORT_ID', '500')
+    try:
+        ROTD_FALLBACK_MAX_AIRPORT_ID = int((_rotd_fallback_max_id_raw or '500').split('#')[0].strip())
+    except ValueError:
+        print(
+            f"Warning: Invalid ROTD_FALLBACK_MAX_AIRPORT_ID "
+            f"'{_rotd_fallback_max_id_raw}', using default 500"
+        )
+        ROTD_FALLBACK_MAX_AIRPORT_ID = 500
+    if ROTD_FALLBACK_MAX_AIRPORT_ID < 1:
+        print(
+            f"Warning: ROTD_FALLBACK_MAX_AIRPORT_ID "
+            f"'{ROTD_FALLBACK_MAX_AIRPORT_ID}' must be >= 1, using default 500"
+        )
+        ROTD_FALLBACK_MAX_AIRPORT_ID = 500
+    ROTD_DEST_MAX_SIZE_FILTER_ENABLED = os.getenv('ROTD_DEST_MAX_SIZE_FILTER_ENABLED', 'false').lower() == 'true'
+    _rotd_dest_max_size_raw = os.getenv('ROTD_DEST_MAX_SIZE', '7')
+    try:
+        ROTD_DEST_MAX_SIZE = int((_rotd_dest_max_size_raw or '7').split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid ROTD_DEST_MAX_SIZE '{_rotd_dest_max_size_raw}', using default 7")
+        ROTD_DEST_MAX_SIZE = 7
+    if ROTD_DEST_MAX_SIZE < 1:
+        print(f"Warning: ROTD_DEST_MAX_SIZE '{ROTD_DEST_MAX_SIZE}' must be >= 1, using default 7")
+        ROTD_DEST_MAX_SIZE = 7
     _rotd_min_distance_raw = os.getenv('ROTD_MIN_DISTANCE_KM', '5500')
     try:
         ROTD_MIN_DISTANCE_KM = int((_rotd_min_distance_raw or '5500').split('#')[0].strip())
