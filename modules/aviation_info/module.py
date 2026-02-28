@@ -205,6 +205,22 @@ class AviationInfoModule:
             runway_text = f"{runway_value} m" if isinstance(runway_value, (int, float)) else str(runway_value)
             embed.add_field(name="🛬 Runway", value=runway_text, inline=True)
 
+            population_value = normalized.get("population")
+            pop_elite_value = normalized.get("pop_elite")
+            income_level_value = normalized.get("income_level")
+            population_text = (
+                format_int(population_value) if isinstance(population_value, (int, float)) else str(population_value)
+            )
+            pop_elite_text = (
+                format_int(pop_elite_value) if isinstance(pop_elite_value, (int, float)) else str(pop_elite_value)
+            )
+            income_level_text = (
+                format_int(income_level_value) if isinstance(income_level_value, (int, float)) else str(income_level_value)
+            )
+            embed.add_field(name="👥 Population", value=population_text or "-", inline=True)
+            embed.add_field(name="💰 Income", value=income_level_text or "-", inline=True)
+            embed.add_field(name="🍷 Elites", value=pop_elite_text or "-", inline=True)
+
             self._queries_success += 1
             await interaction.followup.send(embed=embed)
         except Exception as e:

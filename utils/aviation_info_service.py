@@ -169,6 +169,9 @@ class AviationInfoService:
             "country_code": _pick(airport, ["countryCode", "country_code"], default=""),
             "size": _pick(airport, ["size"], default="-"),
             "runway": _pick(airport, ["runwayLength", "runway"], default="-"),
+            "population": _pick(airport, ["population", "pop"], default="-"),
+            "income_level": _pick(airport, ["incomeLevel", "income_level"], default="-"),
+            "pop_elite": _pick(airport, ["popElite", "pop_elite"], default="-"),
         }
 
     def normalize_model(self, model: Dict[str, Any]) -> Dict[str, Any]:
