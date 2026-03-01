@@ -74,6 +74,17 @@ Copy-Item env.example .env
 
 Then fill `.env` with your values.
 
+## Production Baseline
+
+Recommended settings for production in `.env`:
+
+- `RUN_SUPERVISED=true` for automatic recovery.
+- `CLEAR_GUILD_COMMANDS_ON_STARTUP=false` to avoid deleting guild commands on each restart.
+- `ROTD_SCHEDULE_ENABLED=true` only if you want daily automatic ROTD posts.
+- `AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false` unless your team needs ID-based airport lookups.
+- Keep `ROTD_ORIGIN_ID` and `ROTD_DEST_ID` empty for random-route behavior.
+- Set `BOT_STATUS=Monitoring Oil Prices` (or another stable production status text).
+
 ## Environment Variables
 
 Current keys from `env.example`:
@@ -97,7 +108,7 @@ MFC_AIRPORTS_PATH=/airports
 MFC_AIRPLANE_MODELS_PATH=/airplane-models
 
 # Bot Configuration
-BOT_STATUS=Testing Aviation Info
+BOT_STATUS=Monitoring Oil Prices
 CLEAR_GUILD_COMMANDS_ON_STARTUP=false
 
 # Route of the Day (ROTD)
