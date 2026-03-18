@@ -9,6 +9,7 @@ Design goals:
 import logging
 import random
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, List
 
@@ -21,6 +22,7 @@ class ROTDService:
     def __init__(self):
         self.client = create_mfc_client()
         self._max_airport_id: Optional[int] = None
+        self._airport_ids: List[int] = []
         self._airport_cache: Dict[int, Tuple[float, Dict[str, Any]]] = {}
         self._airport_cache_ttl_seconds: int = 600
 
@@ -48,20 +50,32 @@ class ROTDService:
         airports = self.client.get_all_airports()
         
         if airports and isinstance(airports, list):
-            max_id = max(apt.get('id', 0) for apt in airports if apt.get('id'))
+            airport_ids = sorted(
+                apt.get('id')
+                for apt in airports
+                if isinstance(apt, dict) and isinstance(apt.get('id'), int)
+            )
+            max_id = max(airport_ids) if airport_ids else 0
             self._max_airport_id = max_id
+            self._airport_ids = airport_ids
             now_ts = time.time()
             for apt in airports:
                 if isinstance(apt, dict):
                     apt_id = apt.get('id')
                     if isinstance(apt_id, int):
                         self._airport_cache[apt_id] = (now_ts + self._airport_cache_ttl_seconds, apt)
-            logger.info(f"ROTD: Found {len(airports)} airports, max ID: {max_id}")
+            logger.info(
+                "ROTD: Found %s airports, valid IDs=%s, max ID=%s",
+                len(airports),
+                len(self._airport_ids),
+                max_id,
+            )
             return max_id
         else:
             fallback_max_id = Config.ROTD_FALLBACK_MAX_AIRPORT_ID
             logger.warning("ROTD: Failed to fetch airports, using fallback max ID of %s", fallback_max_id)
             self._max_airport_id = fallback_max_id
+            self._airport_ids = []
             return fallback_max_id
 
     def _select_candidate_pair(self) -> Optional[Tuple[int, int]]:
@@ -86,10 +100,20 @@ class ROTDService:
         
         # Initialize max ID if needed (one-time operation)
         max_id = self._initialize_max_id()
+        logger.info(
+            "ROTD API config: base=%s search_route=%s research_link=%s airport_detail=%s airport_detail_static=%s airports_static=%s",
+            getattr(self.client, "base_url", ""),
+            getattr(self.client, "search_route_path_template", ""),
+            getattr(self.client, "research_link_path_template", ""),
+            getattr(self.client, "airport_detail_path_template", ""),
+            getattr(self.client, "airport_detail_static_path_template", ""),
+            getattr(self.client, "airports_static_path", ""),
+        )
         
+        pool_desc = f"valid-id pool ({len(self._airport_ids)} ids)" if self._airport_ids else f"range 1-{max_id}"
         logger.info(
             "ROTD: Searching for random airport pair "
-            f"(ID range: 1-{max_id}, phase1={min_size}/{min_size} <=50, "
+            f"(selection={pool_desc}, phase1={min_size}/{min_size} <=50, "
             f"phase2={min_size}/{max(2, min_size - 1)} <=100, "
             f"phase3={max(2, min_size - 1)}/{max(2, min_size - 1)} >100, "
             f"min_distance_km={min_distance_km}, "
@@ -108,6 +132,7 @@ class ROTDService:
         attempt_no = 0
         restart_count = 0
         total_attempts = 0
+        reject_reasons: Counter[str] = Counter()
         while True:
             # If API is unhealthy (breaker open), stop trying and let caller skip this cycle.
             if getattr(self.client.breaker, "state", None) == "open":
@@ -119,10 +144,12 @@ class ROTDService:
             if attempt_no > effective_max_attempts:
                 restart_count += 1
                 logger.warning(
-                    "ROTD: Could not find valid pair after %s attempts in this cycle; restarting search (restart=%s, total_attempts=%s)",
+                    "ROTD: Could not find valid pair after %s attempts in this cycle; restarting search "
+                    "(restart=%s, total_attempts=%s, rejects=%s)",
                     effective_max_attempts,
                     restart_count,
                     total_attempts,
+                    dict(reject_reasons),
                 )
                 attempt_no = 1
             if attempt_no <= 50:
@@ -143,22 +170,28 @@ class ROTDService:
                     min_size_dest,
                 )
 
-            # Generate two different random IDs
-            origin_id = random.randint(1, max_id)
-            dest_id = random.randint(1, max_id)
+            # Generate two different IDs, preferring known valid IDs from airport catalog.
+            if len(self._airport_ids) >= 2:
+                origin_id, dest_id = random.sample(self._airport_ids, 2)
+            else:
+                origin_id = random.randint(1, max_id)
+                dest_id = random.randint(1, max_id)
             
             if origin_id == dest_id:
+                reject_reasons["same_airport"] += 1
                 continue
             
             # Validate both airports exist and meet size requirements
             try:
                 origin_airport = self._get_airport_cached(origin_id)
                 if not origin_airport:
+                    reject_reasons["origin_not_found"] += 1
                     logger.debug(f"ROTD attempt {attempt_no}: Airport {origin_id} not found")
                     continue
                 
                 origin_size = origin_airport.get('size', 0)
                 if origin_size < min_size_origin:
+                    reject_reasons["origin_below_min_size"] += 1
                     logger.debug(
                         f"ROTD attempt {attempt_no}: Airport {origin_id} size {origin_size} < {min_size_origin} (origin)"
                     )
@@ -166,16 +199,19 @@ class ROTDService:
                 
                 dest_airport = self._get_airport_cached(dest_id)
                 if not dest_airport:
+                    reject_reasons["dest_not_found"] += 1
                     logger.debug(f"ROTD attempt {attempt_no}: Airport {dest_id} not found")
                     continue
                 
                 dest_size = dest_airport.get('size', 0)
                 if dest_size < min_size_dest:
+                    reject_reasons["dest_below_min_size"] += 1
                     logger.debug(
                         f"ROTD attempt {attempt_no}: Airport {dest_id} size {dest_size} < {min_size_dest} (dest)"
                     )
                     continue
                 if dest_max_size_filter_enabled and dest_size >= dest_max_size:
+                    reject_reasons["dest_above_max_size"] += 1
                     logger.debug(
                         "ROTD attempt %s: Airport %s size %s is not < %s (dest max filter)",
                         attempt_no,
@@ -189,10 +225,21 @@ class ROTDService:
                 route = self.client.search_route(origin_id, dest_id)
                 if route and isinstance(route, list) and len(route) > 0:
                     research = self.client.research_link(origin_id, dest_id)
+                    if not isinstance(research, dict):
+                        reject_reasons["research_missing_or_invalid"] += 1
+                        logger.debug(
+                            "ROTD attempt %s: research-link invalid for %s->%s (type=%s)",
+                            attempt_no,
+                            origin_id,
+                            dest_id,
+                            type(research).__name__,
+                        )
+                        continue
                     distance_raw = research.get("distance") if isinstance(research, dict) else None
                     try:
                         distance_km = float(distance_raw)
                     except (TypeError, ValueError):
+                        reject_reasons["distance_missing_or_invalid"] += 1
                         logger.debug(
                             "ROTD attempt %s: Missing/invalid distance for %s->%s (%r)",
                             attempt_no,
@@ -202,6 +249,7 @@ class ROTDService:
                         )
                         continue
                     if distance_km < float(min_distance_km):
+                        reject_reasons["distance_below_min"] += 1
                         logger.debug(
                             "ROTD attempt %s: Distance %.0f km below minimum %s km for %s->%s",
                             attempt_no,
@@ -214,19 +262,28 @@ class ROTDService:
                     origin_iata = origin_airport.get('iata', '?')
                     dest_iata = dest_airport.get('iata', '?')
                     logger.info(
-                        "ROTD: Found valid pair after %s attempts: %s (%s) -> %s (%s), distance=%.0f km",
+                        "ROTD: Found valid pair after %s attempts (total_attempts=%s, restarts=%s): "
+                        "%s (%s) -> %s (%s), distance=%.0f km, rejects=%s",
                         attempt_no,
+                        total_attempts,
+                        restart_count,
                         origin_id,
                         origin_iata,
                         dest_id,
                         dest_iata,
                         distance_km,
+                        dict(reject_reasons),
                     )
                     return (origin_id, dest_id)
                 else:
+                    if isinstance(route, list):
+                        reject_reasons["search_route_empty"] += 1
+                    else:
+                        reject_reasons["search_route_invalid"] += 1
                     logger.debug(f"ROTD attempt {attempt_no}: No routes for {origin_id}->{dest_id}")
             
             except Exception as e:
+                reject_reasons["validation_exception"] += 1
                 logger.debug(f"ROTD attempt {attempt_no}: Validation error for {origin_id}->{dest_id}: {e}")
                 continue
 
