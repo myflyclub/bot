@@ -41,6 +41,37 @@ class ROTDService:
             return payload
         return None
 
+    @staticmethod
+    def _is_local_transfer_airline(airline_name: Any) -> bool:
+        carrier_l = str(airline_name or "").strip().lower()
+        return carrier_l in {"local transit", "local transfer", "local connection"}
+
+    @classmethod
+    def _is_player_airline_segment(cls, segment: Any) -> bool:
+        if not isinstance(segment, dict):
+            return False
+        airline_name = str(segment.get("airlineName") or "").strip()
+        if not airline_name:
+            return False
+        if cls._is_local_transfer_airline(airline_name):
+            return False
+        return "[bot]" not in airline_name.lower()
+
+    @classmethod
+    def _itinerary_has_player_airline(cls, itinerary: Any) -> bool:
+        if not isinstance(itinerary, dict):
+            return False
+        segments = itinerary.get("route", [])
+        if not isinstance(segments, list):
+            return False
+        return any(cls._is_player_airline_segment(seg) for seg in segments)
+
+    @classmethod
+    def _route_has_player_airline(cls, route: Any) -> bool:
+        if not isinstance(route, list):
+            return False
+        return any(cls._itinerary_has_player_airline(itin) for itin in route)
+
     def _initialize_max_id(self) -> int:
         """Fetch the maximum airport ID once at initialization."""
         if self._max_airport_id is not None:
@@ -224,6 +255,15 @@ class ROTDService:
                 # Validate routes exist
                 route = self.client.search_route(origin_id, dest_id)
                 if route and isinstance(route, list) and len(route) > 0:
+                    if not self._route_has_player_airline(route):
+                        reject_reasons["route_without_player_airline"] += 1
+                        logger.debug(
+                            "ROTD attempt %s: Route %s->%s rejected (no player airline segment)",
+                            attempt_no,
+                            origin_id,
+                            dest_id,
+                        )
+                        continue
                     research = self.client.research_link(origin_id, dest_id)
                     if not isinstance(research, dict):
                         reject_reasons["research_missing_or_invalid"] += 1
@@ -298,6 +338,13 @@ class ROTDService:
         if not route or not research:
             logger.warning("ROTD: Missing data route=%s research=%s", bool(route), bool(research))
             return None
+        if not self._route_has_player_airline(route):
+            logger.info(
+                "ROTD: Skipping %s->%s because route list has no player airline segments",
+                origin_id,
+                dest_id,
+            )
+            return None
 
         # Helper: safe extract with multiple candidate keys
         def _pick(d: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
@@ -309,11 +356,19 @@ class ROTDService:
             return default
 
         # Extract from research-link which uses fromAirport* and toAirport* prefixes
-        a_name = research.get('fromAirportText', '').split('(')[0] if research.get('fromAirportText') else f"Airport {origin_id}"
+        a_name = (
+            research.get('fromAirportText', '').split('(')[0].strip()
+            if research.get('fromAirportText')
+            else f"Airport {origin_id}"
+        )
         a_code = research.get('fromAirportIata', '-')
         a_country = research.get('fromAirportCountryCode', '')
         
-        b_name = research.get('toAirportText', '').split('(')[0] if research.get('toAirportText') else f"Airport {dest_id}"
+        b_name = (
+            research.get('toAirportText', '').split('(')[0].strip()
+            if research.get('toAirportText')
+            else f"Airport {dest_id}"
+        )
         b_code = research.get('toAirportIata', '-')
         b_country = research.get('toAirportCountryCode', '')
 
@@ -411,6 +466,11 @@ class ROTDService:
                     'COLD_MEAL_SERVICE': 'cold meal service'
                 }
                 amenities = [amenity_map.get(f, f.lower().replace('_', ' ')) for f in features]
+                carrier_l = str(carrier).strip().lower()
+                is_local_transit = carrier_l in {"local transit", "local transfer", "local connection"}
+                if not is_local_transit and str(flight_code or "-").strip() in {"", "-", "None"} and not aircraft:
+                    # Defensive fallback for contract variants that encode transfer segments sparsely.
+                    is_local_transit = True
                 
                 segs.append({
                     'from': from_code,
@@ -423,6 +483,7 @@ class ROTDService:
                     'cabin': cabin,
                     'quality': quality,
                     'amenities': amenities,
+                    'is_local_transit': is_local_transit,
                 })
             
             # Build summary from segments
@@ -444,8 +505,16 @@ class ROTDService:
         best_deal = None
         best_seller = None
         if isinstance(route, list):
+            eligible_routes = [itin for itin in route if self._itinerary_has_player_airline(itin)]
+            if not eligible_routes:
+                logger.info(
+                    "ROTD: No eligible itineraries with player airlines for %s->%s",
+                    origin_id,
+                    dest_id,
+                )
+                return None
             # Find BEST_DEAL and BEST_SELLER from remarks
-            for itin in route:
+            for itin in eligible_routes:
                 if isinstance(itin, dict):
                     remarks = itin.get('remarks', [])
                     if 'BEST_DEAL' in remarks and not best_deal:
@@ -454,10 +523,10 @@ class ROTDService:
                         best_seller = map_itin(itin)
             
             # Fallback: use first two if no remarks found
-            if not best_deal and route:
-                best_deal = map_itin(route[0])
-            if not best_seller and len(route) > 1:
-                best_seller = map_itin(route[1])
+            if not best_deal and eligible_routes:
+                best_deal = map_itin(eligible_routes[0])
+            if not best_seller and len(eligible_routes) > 1:
+                best_seller = map_itin(eligible_routes[1])
 
         # Portable date string: e.g., '26 October 2025'
         now = datetime.now(timezone.utc)

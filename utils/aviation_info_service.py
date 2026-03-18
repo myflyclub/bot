@@ -182,6 +182,7 @@ class AviationInfoService:
             "population": _pick(airport, ["population", "pop"], default="-"),
             "income_level": _pick(airport, ["income", "incomeLevel", "income_level"], default="-"),
             "pop_elite": _pick(airport, ["popElite", "pop_elite"], default="-"),
+            "pop_middle_income": _pick(airport, ["popMiddleIncome", "pop_middle_income"], default="-"),
         }
 
     def normalize_model(self, model: Dict[str, Any]) -> Dict[str, Any]:

@@ -184,6 +184,12 @@ class AviationInfoModule:
                 airport = self.service.get_airport_by_id(airport_id)
             elif code:
                 airport = self.service.find_airport_by_code(code)
+                if isinstance(airport, dict):
+                    resolved_id = airport.get("id")
+                    if isinstance(resolved_id, int):
+                        detailed = self.service.get_airport_by_id(resolved_id)
+                        if isinstance(detailed, dict) and detailed:
+                            airport = detailed
 
             if not airport:
                 self._queries_not_found += 1
@@ -212,6 +218,7 @@ class AviationInfoModule:
 
             population_value = normalized.get("population")
             pop_elite_value = normalized.get("pop_elite")
+            pop_middle_income_value = normalized.get("pop_middle_income")
             income_level_value = normalized.get("income_level")
             population_text = (
                 format_int(population_value) if isinstance(population_value, (int, float)) else str(population_value)
@@ -219,12 +226,18 @@ class AviationInfoModule:
             pop_elite_text = (
                 format_int(pop_elite_value) if isinstance(pop_elite_value, (int, float)) else str(pop_elite_value)
             )
+            middle_income_text = (
+                f"{float(pop_middle_income_value):.1f}%"
+                if isinstance(pop_middle_income_value, (int, float))
+                else str(pop_middle_income_value)
+            )
             income_level_text = (
                 format_int(income_level_value) if isinstance(income_level_value, (int, float)) else str(income_level_value)
             )
             embed.add_field(name="👥 Population", value=population_text or "-", inline=True)
             embed.add_field(name="💰 Income", value=income_level_text or "-", inline=True)
             embed.add_field(name="🍷 Elites", value=pop_elite_text or "-", inline=True)
+            embed.add_field(name="💵 Middle Income", value=middle_income_text or "-", inline=True)
 
             self._queries_success += 1
             await interaction.followup.send(embed=embed)

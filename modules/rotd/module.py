@@ -216,7 +216,7 @@ class RotdModule:
             try:
                 pair = await asyncio.wait_for(
                     asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=120,
+                    timeout=300,
                 )
             except asyncio.TimeoutError:
                 await interaction.followup.send("Random selection timed out. Please try again.", ephemeral=True)
@@ -248,7 +248,7 @@ class RotdModule:
             try:
                 pair = await asyncio.wait_for(
                     asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=120,
+                    timeout=600,
                 )
             except asyncio.TimeoutError:
                 self.logger.error("ROTD: Random selection timed out")
