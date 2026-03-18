@@ -84,15 +84,14 @@ class AviationInfoService:
 
     def find_airport_by_code(self, code: str) -> Optional[Dict[str, Any]]:
         q = (code or "").strip().upper()
-        if len(q) not in (3, 4):
+        if len(q) != 3:
             return None
         airports = self.get_all_airports()
         for airport in airports:
             if not isinstance(airport, dict):
                 continue
             iata = str(_pick(airport, ["iata", "iataCode"], default="")).upper()
-            icao = str(_pick(airport, ["icao", "icaoCode"], default="")).upper()
-            if q and q in (iata, icao):
+            if q and q == iata:
                 return airport
         return None
 
@@ -159,6 +158,17 @@ class AviationInfoService:
         return [x[1] for x in scored[:limit]]
 
     def normalize_airport(self, airport: Dict[str, Any]) -> Dict[str, Any]:
+        runway_from_list = "-"
+        runways = airport.get("runways")
+        if isinstance(runways, list):
+            lengths = [
+                int(item.get("length"))
+                for item in runways
+                if isinstance(item, dict) and isinstance(item.get("length"), (int, float))
+            ]
+            if lengths:
+                runway_from_list = max(lengths)
+
         return {
             "id": _pick(airport, ["id"]),
             "name": _pick(airport, ["name", "airportName"], default="Unknown"),
@@ -168,10 +178,11 @@ class AviationInfoService:
             "country": _pick(airport, ["countryName", "country", "countryCode"], default="-"),
             "country_code": _pick(airport, ["countryCode", "country_code"], default=""),
             "size": _pick(airport, ["size"], default="-"),
-            "runway": _pick(airport, ["runwayLength", "runway"], default="-"),
+            "runway": _pick(airport, ["runwayLength", "runway"], default=runway_from_list),
             "population": _pick(airport, ["population", "pop"], default="-"),
-            "income_level": _pick(airport, ["incomeLevel", "income_level"], default="-"),
+            "income_level": _pick(airport, ["income", "incomeLevel", "income_level"], default="-"),
             "pop_elite": _pick(airport, ["popElite", "pop_elite"], default="-"),
+            "pop_middle_income": _pick(airport, ["popMiddleIncome", "pop_middle_income"], default="-"),
         }
 
     def normalize_model(self, model: Dict[str, Any]) -> Dict[str, Any]:

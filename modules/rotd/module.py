@@ -180,7 +180,7 @@ class RotdModule:
                 return
             origin_id, dest_id = pair
 
-            payload = await self._generate_payload(origin_id, dest_id, timeout=25)
+            payload = await self._generate_payload(origin_id, dest_id, timeout=45)
             if not payload:
                 await interaction.followup.send("Could not generate route at this time.", ephemeral=True)
                 return
@@ -209,11 +209,14 @@ class RotdModule:
         if origin_id is not None and dest_id is not None:
             return origin_id, dest_id
         if origin_id is None and dest_id is None:
-            await interaction.followup.send("Selecting random airport pair...", ephemeral=True)
+            await interaction.followup.send(
+                "Selecting random airport pair (this can take up to 2 minutes)...",
+                ephemeral=True,
+            )
             try:
                 pair = await asyncio.wait_for(
                     asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=30,
+                    timeout=300,
                 )
             except asyncio.TimeoutError:
                 await interaction.followup.send("Random selection timed out. Please try again.", ephemeral=True)
@@ -245,7 +248,7 @@ class RotdModule:
             try:
                 pair = await asyncio.wait_for(
                     asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=45,
+                    timeout=600,
                 )
             except asyncio.TimeoutError:
                 self.logger.error("ROTD: Random selection timed out")
@@ -254,7 +257,7 @@ class RotdModule:
                 self.logger.warning("ROTD: Could not find valid random pair; skipping")
                 return None
             origin_id, dest_id = pair
-        return await self._generate_payload(origin_id, dest_id, timeout=25)
+        return await self._generate_payload(origin_id, dest_id, timeout=45)
 
     async def _generate_payload(self, origin_id: int, dest_id: int, timeout: int) -> Optional[Dict[str, Any]]:
         try:

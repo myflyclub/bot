@@ -41,7 +41,9 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
     b_code = payload.get("b_code", "B")
     b_flag = payload.get("b_flag") or ""
 
-    route_line = f"{a_code} {a_flag} -> {b_code} {b_flag}".strip()
+    route_line = " ".join(part for part in [a_code, a_flag] if part).strip() + " -> " + " ".join(
+        part for part in [b_code, b_flag] if part
+    ).strip()
 
     a_city_label = " ".join(f"{a_flag} {a_name}".split()).strip()
     b_city_label = " ".join(f"{b_flag} {b_name}".split()).strip()
@@ -111,7 +113,11 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
             amenities = seg.get("amenities", []) or []
             amenities_text = ", ".join(amenities) if amenities else "none"
             carrier_l = str(carrier).strip().lower()
-            is_local_transit = carrier_l in {"local transit", "local transfer"}
+            is_local_transit = bool(seg.get("is_local_transit")) or carrier_l in {
+                "local transit",
+                "local transfer",
+                "local connection",
+            }
             lines.append(f"{'🚕' if is_local_transit else '🛫'} {seg_from} -> {seg_to}")
             if is_local_transit:
                 # Local hops usually have no flight number/aircraft; show a cleaner transfer line.

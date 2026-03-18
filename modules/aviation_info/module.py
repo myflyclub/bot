@@ -50,10 +50,10 @@ class AviationInfoModule:
             await self._handle_plane_command(interaction, model)
 
         if self._airport_id_lookup_enabled:
-            @tree.command(name="airport", description="Get airport information by ID or IATA/ICAO code")
+            @tree.command(name="airport", description="Get airport information by ID or IATA code")
             @app_commands.describe(
                 airport_id="Airport ID from MyFly",
-                code="IATA/ICAO code (ex: EZE, KJFK)",
+                code="IATA code (ex: EZE, JFK)",
             )
             async def airport_command(
                 interaction: discord.Interaction,
@@ -62,15 +62,15 @@ class AviationInfoModule:
             ):
                 await self._handle_airport_command(interaction, airport_id=airport_id, code=code)
         else:
-            @tree.command(name="airport", description="Get airport information by IATA/ICAO code")
-            @app_commands.describe(code="IATA/ICAO code (ex: EZE, KJFK)")
+            @tree.command(name="airport", description="Get airport information by IATA code")
+            @app_commands.describe(code="IATA code (ex: EZE, JFK)")
             async def airport_command(interaction: discord.Interaction, code: str):
                 await self._handle_airport_command(interaction, airport_id=None, code=code)
 
         @tree.command(name="research", description="Research demand and relationship between two airport codes")
         @app_commands.describe(
-            origin_code="Origin IATA/ICAO code (ex: EZE, SAEZ)",
-            dest_code="Destination IATA/ICAO code (ex: JFK, KJFK)",
+            origin_code="Origin IATA code (ex: EZE, JFK)",
+            dest_code="Destination IATA code (ex: LHR, CDG)",
         )
         async def research_command(interaction: discord.Interaction, origin_code: str, dest_code: str):
             await self._handle_research_command(interaction, origin_code, dest_code)
@@ -171,6 +171,12 @@ class AviationInfoModule:
                     "Airport ID must be a positive integer.",
                 )
                 return
+            if airport_id is None and code and len(code.strip()) != 3:
+                self._queries_not_found += 1
+                await interaction.response.send_message(
+                    "IATA code for `code` must be exactly 3 characters long.",
+                )
+                return
 
             await interaction.response.defer(thinking=True)
             airport = None
@@ -178,6 +184,12 @@ class AviationInfoModule:
                 airport = self.service.get_airport_by_id(airport_id)
             elif code:
                 airport = self.service.find_airport_by_code(code)
+                if isinstance(airport, dict):
+                    resolved_id = airport.get("id")
+                    if isinstance(resolved_id, int):
+                        detailed = self.service.get_airport_by_id(resolved_id)
+                        if isinstance(detailed, dict) and detailed:
+                            airport = detailed
 
             if not airport:
                 self._queries_not_found += 1
@@ -197,7 +209,6 @@ class AviationInfoModule:
                 color=discord.Color.green(),
             )
             embed.add_field(name="🧭 IATA", value=str(normalized["iata"]), inline=True)
-            embed.add_field(name="🗺️ ICAO", value=str(normalized["icao"]), inline=True)
             embed.add_field(name="🏙️ City", value=str(normalized["city"]), inline=True)
             embed.add_field(name="🌍 Country", value=country_text, inline=True)
             embed.add_field(name="📏 Size", value=str(normalized["size"]), inline=True)
@@ -207,6 +218,7 @@ class AviationInfoModule:
 
             population_value = normalized.get("population")
             pop_elite_value = normalized.get("pop_elite")
+            pop_middle_income_value = normalized.get("pop_middle_income")
             income_level_value = normalized.get("income_level")
             population_text = (
                 format_int(population_value) if isinstance(population_value, (int, float)) else str(population_value)
@@ -214,12 +226,18 @@ class AviationInfoModule:
             pop_elite_text = (
                 format_int(pop_elite_value) if isinstance(pop_elite_value, (int, float)) else str(pop_elite_value)
             )
+            middle_income_text = (
+                f"{float(pop_middle_income_value):.1f}%"
+                if isinstance(pop_middle_income_value, (int, float))
+                else str(pop_middle_income_value)
+            )
             income_level_text = (
                 format_int(income_level_value) if isinstance(income_level_value, (int, float)) else str(income_level_value)
             )
             embed.add_field(name="👥 Population", value=population_text or "-", inline=True)
             embed.add_field(name="💰 Income", value=income_level_text or "-", inline=True)
             embed.add_field(name="🍷 Elites", value=pop_elite_text or "-", inline=True)
+            embed.add_field(name="💵 Middle Income", value=middle_income_text or "-", inline=True)
 
             self._queries_success += 1
             await interaction.followup.send(embed=embed)
@@ -243,10 +261,10 @@ class AviationInfoModule:
         try:
             origin_q = (origin_code or "").strip().upper()
             dest_q = (dest_code or "").strip().upper()
-            if len(origin_q) not in (3, 4) or len(dest_q) not in (3, 4):
+            if len(origin_q) != 3 or len(dest_q) != 3:
                 self._queries_not_found += 1
                 await interaction.response.send_message(
-                    "IATA/ICAO codes for `origin_code` and `dest_code` must be 3 or 4 characters long.",
+                    "IATA codes for `origin_code` and `dest_code` must be exactly 3 characters long.",
                 )
                 return
             if origin_q == dest_q:

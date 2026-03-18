@@ -7,7 +7,7 @@ project resilience patterns. It avoids the Airports endpoint unless explicitly n
 
 import time
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -86,6 +86,9 @@ class MyFlyApiClient:
         self.research_link_path_template = Config.MFC_RESEARCH_LINK_PATH_TEMPLATE
         self.airport_by_id_path_template = Config.MFC_AIRPORT_BY_ID_PATH_TEMPLATE
         self.airports_path = Config.MFC_AIRPORTS_PATH
+        self.airports_static_path = Config.MFC_AIRPORTS_STATIC_PATH
+        self.airport_detail_path_template = Config.MFC_AIRPORT_DETAIL_PATH_TEMPLATE
+        self.airport_detail_static_path_template = Config.MFC_AIRPORT_DETAIL_STATIC_PATH_TEMPLATE
         self.airplane_models_path = Config.MFC_AIRPLANE_MODELS_PATH
         self.breaker = SimpleCircuitBreaker(
             failure_threshold=Config.CB_FAILURE_THRESHOLD,
@@ -118,22 +121,130 @@ class MyFlyApiClient:
     def research_link(self, origin_id: int, dest_id: int) -> Optional[Dict[str, Any]]:
         return self._get(self.research_link_path_template.format(origin_id=origin_id, dest_id=dest_id))
 
+    @staticmethod
+    def _derive_runway_length(payload: Dict[str, Any]) -> Optional[int]:
+        runway_length = payload.get("runwayLength")
+        if isinstance(runway_length, (int, float)):
+            return int(runway_length)
+
+        runways = payload.get("runways")
+        if not isinstance(runways, list):
+            return None
+
+        lengths: List[int] = []
+        for runway in runways:
+            if not isinstance(runway, dict):
+                continue
+            length = runway.get("length")
+            if isinstance(length, (int, float)):
+                lengths.append(int(length))
+        return max(lengths) if lengths else None
+
+    @classmethod
+    def _merge_airport_payload(
+        cls,
+        airport_id: int,
+        static_payload: Optional[Dict[str, Any]],
+        dynamic_payload: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(static_payload, dict) and not isinstance(dynamic_payload, dict):
+            return None
+
+        merged: Dict[str, Any] = {}
+        if isinstance(static_payload, dict):
+            merged.update(static_payload)
+        if isinstance(dynamic_payload, dict):
+            merged.update(dynamic_payload)
+        merged.setdefault("id", airport_id)
+
+        runway_length = cls._derive_runway_length(merged)
+        if runway_length is not None:
+            merged["runwayLength"] = runway_length
+        return merged
+
+    def get_airport_detail(self, airport_id: int) -> Optional[Dict[str, Any]]:
+        return self._get(self.airport_detail_path_template.format(airport_id=airport_id))
+
+    def get_airport_detail_static(self, airport_id: int) -> Optional[Dict[str, Any]]:
+        return self._get(self.airport_detail_static_path_template.format(airport_id=airport_id))
+
     def get_airport(self, airport_id: int) -> Optional[Dict[str, Any]]:
-        """Fetch airport details by ID. Used for random selection."""
-        return self._get(self.airport_by_id_path_template.format(airport_id=airport_id))
+        """Fetch merged airport details by ID from detail-static + detail endpoints."""
+        static_payload = self.get_airport_detail_static(airport_id)
+        dynamic_payload = self.get_airport_detail(airport_id)
+        merged = self._merge_airport_payload(airport_id, static_payload, dynamic_payload)
+        if isinstance(merged, dict):
+            return merged
+
+        # Legacy fallback for older environments.
+        legacy_payload = self._get(self.airport_by_id_path_template.format(airport_id=airport_id))
+        if isinstance(legacy_payload, dict) and legacy_payload:
+            runway_length = self._derive_runway_length(legacy_payload)
+            if runway_length is not None:
+                legacy_payload["runwayLength"] = runway_length
+            return legacy_payload
+        return None
+
+    @staticmethod
+    def _flatten_airports_static(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        features = payload.get("features")
+        if not isinstance(features, list):
+            return []
+
+        airports: List[Dict[str, Any]] = []
+        for feature in features:
+            if not isinstance(feature, dict):
+                continue
+            properties = feature.get("properties")
+            if not isinstance(properties, dict):
+                continue
+
+            normalized = dict(properties)
+            if "id" not in normalized and isinstance(feature.get("id"), int):
+                normalized["id"] = feature.get("id")
+
+            geometry = feature.get("geometry")
+            if isinstance(geometry, dict):
+                coordinates = geometry.get("coordinates")
+                if isinstance(coordinates, list) and len(coordinates) >= 2:
+                    lon, lat = coordinates[0], coordinates[1]
+                    if isinstance(lat, (int, float)):
+                        normalized["latitude"] = lat
+                    if isinstance(lon, (int, float)):
+                        normalized["longitude"] = lon
+
+            runway_length = MyFlyApiClient._derive_runway_length(normalized)
+            if runway_length is not None:
+                normalized["runwayLength"] = runway_length
+
+            airports.append(normalized)
+        return airports
 
     def get_all_airports(self) -> Optional[list]:
-        """Fetch the complete list of airports. Returns list of airport dicts."""
-        result = self._get(self.airports_path)
-        if result and isinstance(result, list):
-            return result
+        """Fetch airport catalog with static endpoint as primary source."""
+        result = self._get(self.airports_static_path)
+        if isinstance(result, dict):
+            flattened = self._flatten_airports_static(result)
+            if flattened:
+                return flattened
+
+        # Legacy fallback (older API returned a list directly).
+        legacy_result = self._get(self.airports_path)
+        if legacy_result and isinstance(legacy_result, list):
+            return legacy_result
         return None
 
     def get_airplane_models(self) -> Optional[list]:
         """Fetch airplane models from the global endpoint (no auth required)."""
         result = self._get(self.airplane_models_path)
-        if result and isinstance(result, list):
+        if isinstance(result, list):
             return result
+        # Defensive compatibility in case model catalog shape changes again.
+        if isinstance(result, dict):
+            for key in ("models", "airplaneModels", "items", "data"):
+                value = result.get(key)
+                if isinstance(value, list):
+                    return value
         return None
 
     # Intentionally omit airports endpoint unless explicitly needed for charms
