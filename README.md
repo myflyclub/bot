@@ -30,13 +30,13 @@ The bot currently registers:
 - `/stats`: oil session counters.
 - `/randomroute`: generate and post ROTD now.
 - `/plane`: search airplane models by name.
-- `/airport`: airport lookup by IATA/ICAO (and by ID when enabled).
+- `/airport`: airport lookup by IATA (and by ID when enabled).
 - `/research`: research demand/relationship between two airport codes.
 - `/crash_stats`: crash handler stats (admin).
 - `/system_health`: aggregated health across modules (admin).
 - `/system_stats`: aggregated stats across modules (admin).
 
-Note: when `AVIATION_AIRPORT_ID_LOOKUP_ENABLED=true`, `/airport` supports `airport_id` and `code`. Otherwise it supports `code` only.
+Note: when `AVIATION_AIRPORT_ID_LOOKUP_ENABLED=true`, `/airport` supports `airport_id` and `code` (IATA). Otherwise it supports `code` (IATA) only.
 
 ## Requirements
 
@@ -103,8 +103,11 @@ POLLING_INTERVAL=180
 MFC_BASE_URL=https://play.myfly.club
 MFC_SEARCH_ROUTE_PATH_TEMPLATE=/search-route/{origin_id}/{dest_id}
 MFC_RESEARCH_LINK_PATH_TEMPLATE=/research-link/{origin_id}/{dest_id}
-MFC_AIRPORT_BY_ID_PATH_TEMPLATE=/airports/{airport_id}
+MFC_AIRPORT_BY_ID_PATH_TEMPLATE=/airports/{airport_id}/detail
+MFC_AIRPORT_DETAIL_PATH_TEMPLATE=/airports/{airport_id}/detail
+MFC_AIRPORT_DETAIL_STATIC_PATH_TEMPLATE=/airports/{airport_id}/detail-static
 MFC_AIRPORTS_PATH=/airports
+MFC_AIRPORTS_STATIC_PATH=/airports-static
 MFC_AIRPLANE_MODELS_PATH=/airplane-models
 
 # Bot Configuration

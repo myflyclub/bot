@@ -37,11 +37,22 @@ class Config:
         os.getenv('MFC_RESEARCH_LINK_PATH_TEMPLATE'),
         '/research-link/{origin_id}/{dest_id}',
     )
+    # Legacy path kept for backwards compatibility; new API uses detail/detail-static.
     MFC_AIRPORT_BY_ID_PATH_TEMPLATE = _normalize_path(
         os.getenv('MFC_AIRPORT_BY_ID_PATH_TEMPLATE'),
-        '/airports/{airport_id}',
+        '/airports/{airport_id}/detail',
     )
+    MFC_AIRPORT_DETAIL_PATH_TEMPLATE = _normalize_path(
+        os.getenv('MFC_AIRPORT_DETAIL_PATH_TEMPLATE'),
+        '/airports/{airport_id}/detail',
+    )
+    MFC_AIRPORT_DETAIL_STATIC_PATH_TEMPLATE = _normalize_path(
+        os.getenv('MFC_AIRPORT_DETAIL_STATIC_PATH_TEMPLATE'),
+        '/airports/{airport_id}/detail-static',
+    )
+    # Legacy path kept for backwards compatibility; new API uses /airports-static.
     MFC_AIRPORTS_PATH = _normalize_path(os.getenv('MFC_AIRPORTS_PATH'), '/airports')
+    MFC_AIRPORTS_STATIC_PATH = _normalize_path(os.getenv('MFC_AIRPORTS_STATIC_PATH'), '/airports-static')
     MFC_AIRPLANE_MODELS_PATH = _normalize_path(os.getenv('MFC_AIRPLANE_MODELS_PATH'), '/airplane-models')
     
     # Parse POLLING_INTERVAL, handling comments and whitespace
