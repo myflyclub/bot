@@ -87,19 +87,44 @@ Recommended settings for production in `.env`:
 
 ## Environment Variables
 
-Current keys from `env.example`:
+Current content from `env.example`:
 
 ```env
-# Discord Bot Configuration
+# Discord
 DISCORD_TOKEN=
 DISCORD_OIL_CHANNEL=
 DISCORD_RROTD_CHANNEL=
 
-# Oil Price Monitoring Configuration
-OIL_PRICE_URL=https://play.myfly.club/oil-prices
-POLLING_INTERVAL=180
+# Bot Runtime
+BOT_STATUS=Local Test Mode
+CLEAR_GUILD_COMMANDS_ON_STARTUP=true
+RUN_SUPERVISED=true
 
-# MyFly API Configuration
+# Oil Service
+OIL_PRICE_URL=https://play.myfly.club/oil-prices
+POLLING_INTERVAL=180  # 3 minutes in seconds
+
+# Aviation Service
+AVIATION_INFO_ENABLED=true
+AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false
+
+# ROTD Service
+ROTD_ENABLED=true
+ROTD_SCHEDULE_ENABLED=true
+ROTD_SCHEDULE_TZ=UTC
+ROTD_SCHEDULE_HOUR=15
+ROTD_SCHEDULE_MINUTE=0
+ROTD_ORIGIN_ID=
+ROTD_DEST_ID=
+ROTD_MIN_DISTANCE_KM=3000
+ROTD_MIN_AIRPORT_SIZE=5
+ROTD_DEST_MAX_SIZE_FILTER_ENABLED=false
+ROTD_DEST_MAX_SIZE=7
+ROTD_MAX_RETRY_ATTEMPTS=100
+ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS=200
+ROTD_FALLBACK_MAX_AIRPORT_ID=500
+
+# MyFly API
 MFC_BASE_URL=https://play.myfly.club
 MFC_SEARCH_ROUTE_PATH_TEMPLATE=/search-route/{origin_id}/{dest_id}
 MFC_RESEARCH_LINK_PATH_TEMPLATE=/research-link/{origin_id}/{dest_id}
@@ -110,40 +135,15 @@ MFC_AIRPORTS_PATH=/airports
 MFC_AIRPORTS_STATIC_PATH=/airports-static
 MFC_AIRPLANE_MODELS_PATH=/airplane-models
 
-# Bot Configuration
-BOT_STATUS=Monitoring Oil Prices
-CLEAR_GUILD_COMMANDS_ON_STARTUP=false
+# HTTP Circuit Breaker
+CB_FAILURE_THRESHOLD=3  # consecutive failures before opening breaker
+CB_OPEN_SECONDS=120     # cooldown before half-open probe
+CB_HALF_OPEN_PROBES=1   # number of probe requests in half-open
 
-# Route of the Day (ROTD)
-ROTD_ENABLED=true
-ROTD_MIN_AIRPORT_SIZE=3
-ROTD_MAX_RETRY_ATTEMPTS=100
-ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS=500
-ROTD_FALLBACK_MAX_AIRPORT_ID=500
-ROTD_DEST_MAX_SIZE_FILTER_ENABLED=true
-ROTD_DEST_MAX_SIZE=7
-ROTD_MIN_DISTANCE_KM=5500
-ROTD_ORIGIN_ID=
-ROTD_DEST_ID=
-ROTD_SCHEDULE_ENABLED=true
-ROTD_SCHEDULE_TZ=UTC
-ROTD_SCHEDULE_HOUR=15
-ROTD_SCHEDULE_MINUTE=0
-
-# Crash Handler Configuration
+# Crash Handler
 MAX_RESTART_ATTEMPTS=5
-RESTART_DELAY_BASE=10
-EMERGENCY_CHANNEL_ID=
-RUN_SUPERVISED=true
-
-# Aviation Info
-AVIATION_INFO_ENABLED=true
-AVIATION_AIRPORT_ID_LOOKUP_ENABLED=false
-
-# Circuit Breaker (HTTP) Configuration
-CB_FAILURE_THRESHOLD=3
-CB_OPEN_SECONDS=120
-CB_HALF_OPEN_PROBES=1
+RESTART_DELAY_BASE=10   # Base delay in seconds (exponential backoff)
+EMERGENCY_CHANNEL_ID=   # Optional: separate channel for crash alerts (leave empty to use main channel)
 ```
 
 ## Run
