@@ -109,7 +109,7 @@ class ROTDService:
             self._airport_ids = []
             return fallback_max_id
 
-    def _select_candidate_pair(self) -> Optional[Tuple[int, int]]:
+    def _select_candidate_pair(self, timeout_seconds: Optional[int] = None) -> Optional[Tuple[int, int]]:
         """
         Select a random valid airport pair by sampling random IDs and validating.
         Returns a tuple of (origin_id, dest_id) or None if selection fails.
@@ -128,6 +128,9 @@ class ROTDService:
         dest_max_size_filter_enabled = Config.ROTD_DEST_MAX_SIZE_FILTER_ENABLED
         dest_max_size = Config.ROTD_DEST_MAX_SIZE
         effective_max_attempts = max(configured_max_attempts, safety_floor_attempts)
+        deadline = None
+        if timeout_seconds is not None and timeout_seconds > 0:
+            deadline = time.monotonic() + timeout_seconds
         
         # Initialize max ID if needed (one-time operation)
         max_id = self._initialize_max_id()
@@ -150,7 +153,9 @@ class ROTDService:
             f"min_distance_km={min_distance_km}, "
             f"dest_max_size_filter_enabled={dest_max_size_filter_enabled}, "
             f"dest_max_size={dest_max_size}, "
-            f"configured_max_attempts={configured_max_attempts}, effective_max_attempts={effective_max_attempts})"
+            f"configured_max_attempts={configured_max_attempts}, "
+            f"effective_max_attempts={effective_max_attempts}, "
+            f"timeout_seconds={timeout_seconds})"
         )
 
         if configured_max_attempts < safety_floor_attempts:
@@ -165,6 +170,17 @@ class ROTDService:
         total_attempts = 0
         reject_reasons: Counter[str] = Counter()
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.warning(
+                    "ROTD: Random pair selection timed out after %ss "
+                    "(restart=%s, total_attempts=%s, rejects=%s)",
+                    timeout_seconds,
+                    restart_count,
+                    total_attempts,
+                    dict(reject_reasons),
+                )
+                return None
+
             # If API is unhealthy (breaker open), stop trying and let caller skip this cycle.
             if getattr(self.client.breaker, "state", None) == "open":
                 logger.warning("ROTD: API circuit breaker is open; aborting random pair selection")
@@ -182,6 +198,16 @@ class ROTDService:
                     total_attempts,
                     dict(reject_reasons),
                 )
+                if deadline is not None and time.monotonic() >= deadline:
+                    logger.warning(
+                        "ROTD: Random pair selection timed out after %ss before restarting "
+                        "(restart=%s, total_attempts=%s, rejects=%s)",
+                        timeout_seconds,
+                        restart_count,
+                        total_attempts,
+                        dict(reject_reasons),
+                    )
+                    return None
                 attempt_no = 1
             if attempt_no <= 50:
                 min_size_origin = min_size

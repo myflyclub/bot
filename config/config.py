@@ -15,6 +15,20 @@ def _normalize_path(value: str, default: str) -> str:
     path = _clean_env_string(value, default)
     return path if path.startswith('/') else f"/{path}"
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int((raw or str(default)).split('#')[0].strip())
+    except ValueError:
+        print(f"Warning: Invalid {name} '{raw}', using default {default}")
+        return default
+    if value < 1:
+        print(f"Warning: {name} '{value}' must be >= 1, using default {default}")
+        return default
+    return value
+
+
 class Config:
     """Configuration class for the Oil Price Alert Bot"""
     
@@ -29,6 +43,7 @@ class Config:
 
     # MyFly API base and endpoint templates
     MFC_BASE_URL = _clean_env_string(os.getenv('MFC_BASE_URL'), 'https://play.myfly.club').rstrip('/')
+    MFC_API_VERSION = _clean_env_string(os.getenv('MFC_API_VERSION'), 'v5.1.1')
     MFC_SEARCH_ROUTE_PATH_TEMPLATE = _normalize_path(
         os.getenv('MFC_SEARCH_ROUTE_PATH_TEMPLATE'),
         '/search-route/{origin_id}/{dest_id}',
@@ -50,10 +65,16 @@ class Config:
         os.getenv('MFC_AIRPORT_DETAIL_STATIC_PATH_TEMPLATE'),
         '/airports/{airport_id}/detail-static',
     )
-    # Legacy path kept for backwards compatibility; new API uses /airports-static.
+    # Legacy path kept for backwards compatibility; new API uses versioned /api/.../airports-static.
     MFC_AIRPORTS_PATH = _normalize_path(os.getenv('MFC_AIRPORTS_PATH'), '/airports')
-    MFC_AIRPORTS_STATIC_PATH = _normalize_path(os.getenv('MFC_AIRPORTS_STATIC_PATH'), '/airports-static')
-    MFC_AIRPLANE_MODELS_PATH = _normalize_path(os.getenv('MFC_AIRPLANE_MODELS_PATH'), '/airplane-models')
+    MFC_AIRPORTS_STATIC_PATH = _normalize_path(
+        os.getenv('MFC_AIRPORTS_STATIC_PATH'),
+        f'/api/{MFC_API_VERSION}/airports-static',
+    )
+    MFC_AIRPLANE_MODELS_PATH = _normalize_path(
+        os.getenv('MFC_AIRPLANE_MODELS_PATH'),
+        f'/api/{MFC_API_VERSION}/airplane-models',
+    )
     
     # Parse POLLING_INTERVAL, handling comments and whitespace
     _polling_raw = os.getenv('POLLING_INTERVAL', '300')
@@ -76,6 +97,8 @@ class Config:
     ROTD_ENABLED = os.getenv('ROTD_ENABLED', 'false').lower() == 'true'
     ROTD_MIN_AIRPORT_SIZE = int(os.getenv('ROTD_MIN_AIRPORT_SIZE', '3'))
     ROTD_MAX_RETRY_ATTEMPTS = int(os.getenv('ROTD_MAX_RETRY_ATTEMPTS', '100'))
+    ROTD_RANDOM_SELECTION_TIMEOUT_SECONDS = _positive_int_env('ROTD_RANDOM_SELECTION_TIMEOUT_SECONDS', 300)
+    ROTD_SCHEDULE_SELECTION_TIMEOUT_SECONDS = _positive_int_env('ROTD_SCHEDULE_SELECTION_TIMEOUT_SECONDS', 600)
     _rotd_selection_floor_raw = os.getenv('ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS', '500')
     try:
         ROTD_SELECTION_SAFETY_FLOOR_ATTEMPTS = int((_rotd_selection_floor_raw or '500').split('#')[0].strip())

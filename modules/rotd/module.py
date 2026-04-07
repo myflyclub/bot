@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
@@ -209,19 +210,27 @@ class RotdModule:
         if origin_id is not None and dest_id is not None:
             return origin_id, dest_id
         if origin_id is None and dest_id is None:
+            timeout_seconds = int(
+                getattr(self.config, "ROTD_RANDOM_SELECTION_TIMEOUT_SECONDS", 300)
+                if self.config else 300
+            )
             await interaction.followup.send(
-                "Selecting random airport pair (this can take up to 2 minutes)...",
+                f"Selecting random airport pair (this can take up to {timeout_seconds} seconds)...",
                 ephemeral=True,
             )
+            started_at = time.monotonic()
             try:
                 pair = await asyncio.wait_for(
-                    asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=300,
+                    asyncio.to_thread(self.service._select_candidate_pair, timeout_seconds),
+                    timeout=timeout_seconds + 5,
                 )
             except asyncio.TimeoutError:
                 await interaction.followup.send("Random selection timed out. Please try again.", ephemeral=True)
                 return None
             if not pair:
+                if time.monotonic() - started_at >= timeout_seconds:
+                    await interaction.followup.send("Random selection timed out. Please try again.", ephemeral=True)
+                    return None
                 await interaction.followup.send(
                     "Could not find a valid random airport pair. Try providing specific IDs.",
                     ephemeral=True,
@@ -245,10 +254,14 @@ class RotdModule:
             self.logger.info("ROTD: Using configured pair %s -> %s", origin_id, dest_id)
         else:
             self.logger.info("ROTD: No configured pair, selecting random airports")
+            timeout_seconds = int(
+                getattr(self.config, "ROTD_SCHEDULE_SELECTION_TIMEOUT_SECONDS", 600)
+                if self.config else 600
+            )
             try:
                 pair = await asyncio.wait_for(
-                    asyncio.to_thread(self.service._select_candidate_pair),
-                    timeout=600,
+                    asyncio.to_thread(self.service._select_candidate_pair, timeout_seconds),
+                    timeout=timeout_seconds + 5,
                 )
             except asyncio.TimeoutError:
                 self.logger.error("ROTD: Random selection timed out")
