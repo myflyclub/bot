@@ -99,7 +99,7 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
         if segments:
             lines.append("────────────")
 
-        for seg in segments:
+        for idx, seg in enumerate(segments):
             seg_from = seg.get("from", "-")
             seg_to = seg.get("to", "-")
 
@@ -127,6 +127,8 @@ def format_rotd_text(payload: Dict[str, Any]) -> str:
                 lines.append(
                     f"{aircraft} | ⏱️ {duration} | 💵 {price} ({cabin}) | ⭐ {quality} | 🖥️ {amenities_text}"
                 )
+            if idx < len(segments) - 1:
+                lines.append("")
         lines.append("")
 
     add_itinerary("**🏷️ Best Deal**", payload.get("best_deal"))
